@@ -1,0 +1,99 @@
+# Production stack. See README.md.
+name: greencats
+x-db-url: &db-url postgres://greencats:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/greencats
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: greencats
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: greencats
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U greencats"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    build: { context: ., target: tools }
+    command: ["npx", "tsx", "scripts/migrate.ts"]
+    environment:
+      DATABASE_URL: *db-url
+    depends_on:
+      db: { condition: service_healthy }
+
+  app:
+    build: { context: ., target: runner }
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: *db-url
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      DATA_RETENTION_DAYS: ${DATA_RETENTION_DAYS:-1825}
+      SESSION_IDLE_DAYS: ${SESSION_IDLE_DAYS:-7}
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+
+  # Encrypted database dump and photo archive, once a day. Settings are in .env, see .env.example.
+  # Run one now: docker compose run --rm backup once
+  backup:
+    build: { context: ., target: backup }
+    restart: unless-stopped
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      BACKUP_PASSPHRASE: ${BACKUP_PASSPHRASE:-}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
+      BACKUP_REMOTE: ${BACKUP_REMOTE:-}
+      RCLONE_GCS_SERVICE_ACCOUNT_FILE: /run/secrets/gcs.json
+      RCLONE_GCS_BUCKET_POLICY_ONLY: "true"
+    volumes:
+      - ${BACKUP_DIR:-./backups}:/backups
+      - uploads:/uploads:ro
+      # Put the storage service-account key at ./secrets/gcs.json when BACKUP_REMOTE is a gs:// path.
+      - ./secrets:/run/secrets:ro
+    depends_on:
+      db: { condition: service_healthy }
+
+  # One-off commands: docker compose run --rm tools npm run ...
+  tools:
+    build: { context: ., target: tools }
+    profiles: ["tools"]
+    environment:
+      DATABASE_URL: *db-url
+    volumes:
+      - uploads:/app/uploads
+      - ./import:/import:ro
+    depends_on:
+      db: { condition: service_healthy }
+
+volumes:
+  db-data:
+  uploads:
+  caddy-data:
+  caddy-config:

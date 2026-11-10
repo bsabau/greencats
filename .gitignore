@@ -1,0 +1,18 @@
+node_modules
+.next
+.env
+.env.*
+!.env.example
+# Personal data: never commit the workbook, uploaded photos, or database dumps.
+*.xlsx
+/uploads
+/import
+/backups
+*.dump
+*.sql.gz
+coverage
+test-results
+playwright-report
+next-env.d.ts
+*.tsbuildinfo
+/secrets

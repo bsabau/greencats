@@ -1,0 +1,20 @@
+# Local development database only. Reachable from this machine, not from the network.
+name: greencats-dev
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: greencats
+      POSTGRES_PASSWORD: dev-only-password
+      POSTGRES_DB: greencats
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - dev-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U greencats"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+volumes:
+  dev-db:

@@ -1,0 +1,343 @@
+import { expect, test, type Page } from "@playwright/test";
+import sharp from "sharp";
+
+/**
+ * Full run against a stack holding imported data. Needs an admin created with
+ * create-admin, passed as E2E_ADMIN_EMAIL and E2E_ADMIN_PASSWORD.
+ * It adds test records, so run it on a local stack only.
+ */
+const adminEmail = process.env.E2E_ADMIN_EMAIL!;
+const firstPassword = process.env.E2E_ADMIN_PASSWORD!;
+const run = Date.now();
+const adminPassword = `Admin-${run}-password`;
+const volunteer = { email: `qa-vol-${run}@greencats.local`, password: `Volunteer-${run}-pw`, next: `Volunteer-${run}-new` };
+const coordinator = { email: `qa-coord-${run}@greencats.local`, password: `Coordinator-${run}-pw`, next: `Coordinator-${run}-new` };
+
+async function signIn(page: Page, email: string, password: string) {
+  await page.goto("/login");
+  await page.fill('input[name="email"]', email);
+  await page.fill('input[name="password"]', password);
+  await page.click('button:has-text("Intră în cont"), button:has-text("Sign in")');
+}
+async function firstLogin(page: Page, email: string, password: string, next: string) {
+  await signIn(page, email, password);
+  await expect(page).toHaveURL(/\/account/);
+  await page.fill('input[name="current"]', password);
+  await page.fill('input[name="next"]', next);
+  await page.locator('input[name="next"]').press("Enter");
+  await expect(page.getByRole("status")).toBeVisible();
+}
+function watchFailures(page: Page) {
+  const failures: string[] = [];
+  page.on("response", (r) => { if (r.status() >= 500) failures.push(`${r.status()} ${r.url()}`); });
+  page.on("pageerror", (e) => failures.push(e.message));
+  // Anything the content security policy blocks would mean a broken page.
+  page.on("console", (m) => { if (/Content Security Policy/i.test(m.text())) failures.push(m.text()); });
+  return failures;
+}
+
+test.describe.configure({ mode: "serial" });
+
+test("anonymous visitors get nothing", async ({ page, request }) => {
+  await page.goto("/animals");
+  await expect(page).toHaveURL(/\/login/);
+  expect((await request.get("/export/animals")).status()).toBe(401);
+  expect((await request.get("/photos/00000000-0000-0000-0000-000000000000")).status()).toBe(401);
+});
+
+test("wrong password is refused", async ({ page }) => {
+  await signIn(page, adminEmail, "not-the-password");
+  await expect(page.locator('.toast-in[role="alert"]')).toBeVisible();
+});
+
+test("admin full journey", async ({ page }) => {
+  const failures = watchFailures(page);
+  await firstLogin(page, adminEmail, firstPassword, adminPassword);
+
+  for (const person of [
+    { ...volunteer, name: "QA Voluntar", role: "volunteer" },
+    { ...coordinator, name: "QA Coordonator", role: "coordinator" },
+  ]) {
+    await page.goto("/admin/users");
+    const form = page.locator('form:has(input[name="email"])');
+    await form.locator('input[name="name"]').fill(person.name);
+    await form.locator('input[name="email"]').fill(person.email);
+    await form.locator('input[name="password"]').fill(person.password);
+    await form.locator('select[name="role"]').selectOption(person.role);
+    await form.locator("button").click();
+    await expect(page.getByRole("status")).toBeVisible();
+  }
+
+  for (const path of ["/", "/animals", "/people", "/calendar", "/calendar?m=2026-07&type=foster_logistics", "/adoptions", "/visibility", "/reports", "/review", "/admin/audit", "/admin/privacy", "/admin/lists"]) {
+    await page.goto(path);
+    await expect(page.locator("h1").first()).toBeVisible();
+  }
+
+  await page.goto("/animals/new");
+  const name = `QA Pisica ${run}`;
+  await page.fill('input[name="name"]', name);
+  await page.fill('input[name="birthDate"]', "2022-03-01");
+  await page.click('button:has-text("Salvează")');
+  await expect(page.locator("h1")).toHaveText(name);
+
+  // A status needing a person is refused without one.
+  await page.click('button:has-text("Schimbă statutul")');
+  const moveForm = page.locator('dialog[open] form');
+  await moveForm.locator('select[name="status"]').selectOption("foster");
+  await expect(moveForm.locator('input[role="combobox"]')).toBeVisible();
+  await moveForm.locator('button:has-text("Salvează")').click();
+  await expect(page.locator('.toast-in[role="alert"]')).toBeVisible();
+
+  // An adult's vaccine gets a due date a year later, shown on the record.
+  await page.click('button:has-text("Adaugă înregistrare medicală")');
+  const medical = page.locator('dialog[open] form');
+  await medical.locator('select[name="kind"]').selectOption("vaccine_rabies");
+  await medical.locator('input[name="date"]').fill("2026-11-01");
+  await medical.locator('button:has-text("Salvează")').click();
+  await expect(page.locator("#medical")).toContainText("2027");
+
+  // A product with its own interval sets the next due date of a record that uses it.
+  const productName = `QA Produs ${run}`;
+  const catUrl = page.url().split("?")[0];
+  await page.goto("/admin/lists");
+  await page.click('summary:has-text("Produs nou")');
+  const productForm = page.locator('form:has(input[name="intervalDays"])').first();
+  await productForm.locator('input[name="name"]').fill(productName);
+  await productForm.locator('input[name="kinds"][value="deworm_internal"]').check();
+  await productForm.locator('input[name="intervalDays"]').fill("45");
+  await productForm.locator('input[name="aliases"]').fill(`qa-alias-${run}`);
+  await productForm.locator("button").click();
+  await expect(page.getByRole("status")).toBeVisible();
+  await expect(page.locator("main")).toContainText(productName);
+  await page.goto(`${catUrl}?tab=medical`);
+  await page.click('button:has-text("Adaugă înregistrare medicală")');
+  const withProduct = page.locator("dialog[open] form");
+  await withProduct.locator('select[name="kind"]').selectOption("deworm_internal");
+  await withProduct.locator('select[name="productId"]').selectOption({ label: productName });
+  await expect(withProduct.locator('select[name="result"]')).toHaveCount(0);
+  await withProduct.locator('select[name="clinicId"]').selectOption({ label: "Echovet" });
+  await withProduct.locator('input[name="date"]').fill("2026-11-01");
+  await withProduct.locator('button:has-text("Salvează")').click();
+  // The current-status card names the product too; the history row also carries the clinic.
+  await expect(page.locator("#medical li", { hasText: productName }).first()).toBeVisible();
+  const productRow = page.locator("#medical li", { hasText: productName }).filter({ hasText: "Echovet" });
+  await expect(productRow).toContainText("16 dec. 2026");
+  // A test type has no product field.
+  await page.click('button:has-text("Adaugă înregistrare medicală")');
+  await page.locator('dialog[open] select[name="kind"]').selectOption("test_fiv_felv");
+  await expect(page.locator('dialog[open] select[name="productId"]')).toHaveCount(0);
+  await expect(page.locator('dialog[open] select[name="result"]')).toBeVisible();
+  await page.locator("dialog[open]").press("Escape");
+
+  // One tap records today's treatment, and undo removes it again.
+  const before = await page.locator("#medical ul li").count();
+  await page.getByRole("button", { name: /Deparazitare externă/ }).click();
+  await expect(page.locator("#medical ul li")).toHaveCount(before + 1);
+  await page.getByRole("status").getByRole("button", { name: "Anulează" }).click();
+  await expect(page.locator("#medical ul li")).toHaveCount(before);
+
+  // An uploaded photo loses its embedded location.
+  const withGps = await sharp({ create: { width: 40, height: 30, channels: 3, background: "#888" } })
+    .withExif({ IFD0: { Make: "QA-CAMERA-MARKER" }, IFD3: { GPSLatitudeRef: "N", GPSLatitude: "44/1 26/1 0/1" } })
+    .jpeg().toBuffer();
+  expect(withGps.includes("QA-CAMERA-MARKER")).toBe(true);
+  await page.goto(`${page.url().split("?")[0]}?tab=photos`);
+  await page.setInputFiles('input[name="photo"]', { name: "gps.jpg", mimeType: "image/jpeg", buffer: withGps });
+  await page.click('button:has-text("Încarcă")');
+  await expect(page.getByRole("status")).toBeVisible();
+  const photoSrc = (await page.locator('main a[href^="/photos/"]').first().getAttribute("href"))!;
+  const stored = Buffer.from(await (await page.request.get(photoSrc)).body());
+  expect(stored.subarray(0, 2).toString("hex")).toBe("ffd8");
+  expect(stored.includes("QA-CAMERA-MARKER")).toBe(false);
+  expect(stored.includes("Exif")).toBe(false);
+
+  // Global search finds the new cat from anywhere.
+  await page.goto("/calendar");
+  await page.getByLabel("Caută pisici, persoane…").first().fill(`QA Pisica ${run}`);
+  await page.getByRole("button", { name: new RegExp(`QA Pisica ${run}`) }).click();
+  await expect(page.locator("h1")).toHaveText(name);
+
+  // Cards filter instantly as you type.
+  await page.goto("/animals");
+  await page.getByLabel("Caută după nume sau microcip…").fill(`QA Pisica ${run}`);
+  await expect(page.locator("main li a")).toHaveCount(1);
+
+  // Language switch, then back to Romanian.
+  await page.goto("/account");
+  await page.locator('select[name="locale"]').selectOption("en");
+  await page.locator('form:has(select[name="locale"]) button').click();
+  await expect(page.locator("h1")).toHaveText("My account");
+  await page.locator('select[name="locale"]').selectOption("ro");
+  await page.locator('form:has(select[name="locale"]) button').click();
+  await expect(page.locator("h1")).toHaveText("Contul meu");
+
+  await page.goto("/calendar/new");
+  await page.fill('input[name="title"]', `QA Tura ${run}`);
+  await page.fill('input[name="startOn"]', "2026-12-14");
+  await page.fill('input[name="capacity"]', "1");
+  await page.fill('input[name="repeat"]', "1");
+  await page.click('button:has-text("Salvează")');
+  await expect(page).toHaveURL(/m=2026-12/);
+  await expect(page.locator("main")).toContainText(`QA Tura ${run}`);
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/animals");
+  const catHref = (await page.locator("main li a").first().getAttribute("href"))!;
+  const shots: [string, string][] = [
+    ["/", "dashboard"], ["/animals", "animals"], ["/calendar?m=2026-07", "calendar"], ["/adoptions", "adoptions"],
+    [catHref, "cat"], [`${catHref}?tab=medical`, "cat-medical"], ["/people", "people"], ["/reports", "reports"],
+    ["/review", "review"], ["/visibility", "visibility"], ["/account", "account"], ["/admin/users", "users"], ["/admin/audit", "audit"], ["/admin/privacy", "privacy"], ["/admin/lists", "lists"],
+  ];
+  for (const [path, file] of shots) {
+    await page.goto(path);
+    await page.waitForLoadState("networkidle");
+    await page.screenshot({ path: `test-results/${file}.png`, fullPage: true });
+  }
+  await page.setViewportSize({ width: 390, height: 800 });
+  for (const [path, file] of shots) {
+    await page.goto(path);
+    await page.waitForLoadState("networkidle");
+    await page.screenshot({ path: `test-results/${file}-mobile.png` });
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow, `${path} overflows on a phone`).toBeLessThanOrEqual(0);
+  }
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  expect(failures).toEqual([]);
+});
+
+test("a volunteer can't reach contact details or admin pages; a coordinator can see contacts", async ({ page, browser }) => {
+  // Find a person with a phone, as a coordinator.
+  await firstLogin(page, coordinator.email, coordinator.password, coordinator.next);
+  await page.goto("/people");
+  const row = page.locator("tbody tr").filter({ hasText: "+" }).first();
+  const phone = (await row.locator("td").nth(1).innerText()).split(",")[0].trim();
+  const href = (await row.locator("a").first().getAttribute("href"))!;
+  expect(phone).toMatch(/^\+\d+/);
+  await page.goto(href);
+  await expect(page.locator("main")).toContainText(phone);
+  expect((await page.request.get("/export/adoptions")).status()).toBe(200);
+  const personId = href.split("/").pop()!;
+  const exported = await page.request.get(`/export/person/${personId}`);
+  expect(exported.status()).toBe(200);
+  expect(JSON.stringify(await exported.json())).toContain(phone);
+  // Erasing is for admins only.
+  await page.goto("/admin/privacy");
+  await expect(page.locator("h1")).not.toHaveText("Protecția datelor");
+
+  const context = await browser.newContext();
+  const vol = await context.newPage();
+  const failures = watchFailures(vol);
+  await firstLogin(vol, volunteer.email, volunteer.password, volunteer.next);
+
+  for (const path of [href, "/people"]) {
+    await vol.goto(path);
+    expect(await vol.content()).not.toContain(phone);
+  }
+  expect((await vol.request.get(`/export/person/${personId}`)).status()).toBe(403);
+  // No phone number reaches a volunteer on the pages built from free text, and no foster rating on the people list.
+  for (const path of ["/visibility", "/adoptions", "/calendar", "/"]) {
+    await vol.goto(path);
+    const body = await vol.locator("main").innerText();
+    expect(body, `${path} shows a phone number to a volunteer`).not.toMatch(/(?<![\d.])(?:\+?40|0)[ .-]?7(?:[ .-]?\d){8}(?![\d.])/);
+  }
+  await vol.goto("/people");
+  await expect(vol.locator("thead")).not.toContainText("Evaluare foster");
+  await vol.goto("/admin/privacy");
+  await expect(vol.locator("h1")).not.toHaveText("Protecția datelor");
+  await vol.goto("/admin/lists");
+  await expect(vol.locator("h1")).not.toHaveText("Liste");
+  await vol.goto("/admin/users");
+  await expect(vol.locator('.toast-in[role="alert"]')).toBeVisible();
+  await expect(vol.locator("h1")).not.toHaveText("Utilizatori");
+  await vol.goto("/review");
+  await expect(vol.locator('.toast-in[role="alert"]')).toBeVisible();
+  await expect(vol.locator("h1")).not.toHaveText("De verificat după import");
+  await vol.goto("/adoptions");
+  await expect(vol.locator("form select[name='stage']")).toHaveCount(0);
+  expect((await vol.request.get("/export/adoptions")).status()).toBe(403);
+  expect((await vol.request.get("/export/animals")).status()).toBe(200);
+
+  // The volunteer takes the only place on a shift; the coordinator then can't.
+  // The day's panel lists everything, even when the month cell shows only the first few.
+  await vol.goto("/calendar?m=2026-12&d=2026-12-14");
+  await vol.locator(`a:has-text("QA Tura ${run}")`).first().click();
+  await vol.click('button:has-text("Mă înscriu")');
+  await expect(vol.locator("main")).toContainText("QA Voluntar");
+  const shiftUrl = vol.url();
+  await page.goto(shiftUrl);
+  await expect(page.locator('button:has-text("Mă înscriu")')).toHaveCount(0);
+  await vol.click('button:has-text("Mă retrag")');
+  await expect(vol.locator('button:has-text("Mă înscriu")')).toBeVisible();
+
+  expect(failures).toEqual([]);
+  await context.close();
+});
+
+test("data protection: erase a person, delete a cat and an account, and limits on volunteers", async ({ page, browser }) => {
+  const failures = watchFailures(page);
+  await signIn(page, adminEmail, adminPassword);
+  await expect(page).toHaveURL(/\/$/);
+  const confirm = async (label: string) => {
+    await page.locator(`button[aria-label="${label}"]:visible`).first().click();
+    // The first tap only arms the button. Nothing is submitted yet.
+    await page.waitForTimeout(500);
+    await expect(page.locator('button:has-text("Sigur?"):visible')).toBeVisible();
+    await page.locator('button:has-text("Sigur?"):visible').click();
+  };
+
+  // A changed "back" address can't send the browser to another site.
+  await page.goto("/account");
+  await page.locator('input[name="back"]').evaluate((el) => { (el as HTMLInputElement).value = "//example.org/x"; });
+  await page.locator('form:has(select[name="locale"]) button').click();
+  await page.waitForLoadState("networkidle");
+  expect(new URL(page.url()).pathname).toBe("/account");
+
+  // Erasing a person empties the record and takes it off the list.
+  await page.goto("/people/new");
+  const personName = `QA Persoana ${run}`;
+  await page.fill('input[name="name"]', personName);
+  await page.fill('input[name="phones"]', "0700 000 001");
+  await page.fill('input[name="consentNote"]', "contract de test");
+  await page.click('button:has-text("Salvează")');
+  await expect(page.locator("h1")).toHaveText(personName);
+  await expect(page.locator("main")).toContainText("contract de test");
+  await confirm("Șterge datele persoanei");
+  await expect(page.locator("h1")).toHaveText("Persoană ștearsă");
+  await expect(page.locator("main")).not.toContainText("700");
+  expect(await (await page.request.get(`/api/search?q=${encodeURIComponent(personName)}`)).json()).toEqual([]);
+
+  // A volunteer can't delete a medical record someone else entered. The admin can.
+  const [cat] = await (await page.request.get(`/api/search?q=${encodeURIComponent(`QA Pisica ${run}`)}`)).json();
+  const context = await browser.newContext();
+  const vol = await context.newPage();
+  await signIn(vol, volunteer.email, volunteer.next);
+  await expect(vol).toHaveURL(/\/$/);
+  await vol.goto(`${cat.href}?tab=medical`);
+  await expect(vol.locator("#medical")).toContainText("2027");
+  await expect(vol.locator('#medical button[aria-label="Șterge"]')).toHaveCount(0);
+  await context.close();
+  await page.goto(`${cat.href}?tab=medical`);
+  await expect(page.locator('#medical button[aria-label="Șterge"]')).not.toHaveCount(0);
+
+  // Deleting the cat removes it and its photo.
+  const photo = (await page.request.get(`${cat.href}?tab=photos`).then((r) => r.text())).match(/\/photos\/[0-9a-f-]{36}/)![0];
+  expect((await page.request.get(photo)).status()).toBe(200);
+  await page.click('button:has-text("Modifică detaliile")');
+  await confirm("Șterge animalul");
+  await expect(page).toHaveURL(/\/animals(\?|$)/);
+  expect((await page.request.get(photo)).status()).toBe(404);
+  expect(await (await page.request.get(`/api/search?q=${encodeURIComponent(`QA Pisica ${run}`)}`)).json()).toEqual([]);
+
+  // Deleting accounts.
+  for (const email of [volunteer.email, coordinator.email]) {
+    await page.goto("/admin/users");
+    const row = page.locator("li", { hasText: email });
+    await row.locator('button[aria-label="Șterge contul"]').click();
+    await page.waitForTimeout(300);
+    await expect(page.locator("li", { hasText: email })).toHaveCount(1);
+    await row.locator('button:has-text("Sigur?")').click();
+    await expect(page.locator("li", { hasText: email })).toHaveCount(0);
+  }
+  expect(failures).toEqual([]);
+});

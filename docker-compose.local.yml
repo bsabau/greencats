@@ -1,0 +1,13 @@
+# Try the full production build on this computer, without a domain:
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+# Then open http://localhost:3111 (set LOCAL_PORT in .env to use another port).
+services:
+  app:
+    environment:
+      COOKIE_SECURE: "false"
+      # Lets a short trial password such as admin/admin keep working. Never set this on a real server.
+      ALLOW_WEAK_PASSWORDS: "true"
+    ports:
+      - "127.0.0.1:${LOCAL_PORT:-3111}:3000"
+  caddy:
+    profiles: ["disabled"]

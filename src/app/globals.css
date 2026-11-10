@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-figtree), ui-sans-serif, system-ui, sans-serif;
+  --color-brand-50: #eef7f1;
+  --color-brand-100: #d8ecdf;
+  --color-brand-200: #b4dac2;
+  --color-brand-300: #86c09e;
+  --color-brand-400: #56a177;
+  --color-brand-500: #38855c;
+  --color-brand-600: #296b49;
+  --color-brand-700: #22563c;
+  --color-brand-800: #1d4632;
+  --color-brand-900: #193a2b;
+  --color-brand-950: #0d2018;
+}
+
+:root {
+  --series-1: #1f8a5f;
+  --series-2: #d9772b;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+
+body {
+  background: #faf7f2;
+  color: #1c1917;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-brand-500);
+  outline-offset: 2px;
+}
+
+details > summary::-webkit-details-marker {
+  display: none;
+}
+
+dialog::backdrop {
+  background: rgb(28 25 23 / 0.45);
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.toast-in {
+  animation: toast-in 180ms ease-out;
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .toast-in { animation: none; }
+}
