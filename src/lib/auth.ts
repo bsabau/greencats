@@ -25,7 +25,7 @@ let dummyHash: Promise<string> | undefined;
 export const placeholderHash = () => (dummyHash ??= hash(randomBytes(16).toString("hex")));
 export const verifyPassword = (stored: string, password: string) => verify(stored, password);
 
-const secureCookie = () =>
+export const secureCookie = () =>
   process.env.NODE_ENV === "production" && process.env.COOKIE_SECURE !== "false";
 
 export async function startSession(userId: string, locale: "ro" | "en") {

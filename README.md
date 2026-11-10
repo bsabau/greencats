@@ -21,8 +21,10 @@ docker compose up -d --build
 Create the first administrator. They choose a new password at first login:
 
 ```sh
-docker compose run --rm tools npm run create-admin -- you@example.org "Your Name" "temporary-password-12+"
+docker compose run --rm tools npm run create-admin -- you@example.org "Your Name"
 ```
+
+It asks for a temporary password (12+ characters), which isn't shown as you type.
 
 Import the workbook once. Put it in `import/` first:
 
@@ -34,7 +36,9 @@ Afterwards, work through the **De verificat** page. It lists everything the impo
 could not read with confidence, and photos that need assigning to a cat.
 
 Re-importing requires `--replace`, which **erases all shelter data entered in the
-app** (accounts are kept).
+app** (accounts are kept). It asks you to type the number of animals it will erase,
+and removes the old photo files afterwards. Take a backup first:
+`docker compose run --rm backup once`.
 
 ## Try it on your own computer
 
@@ -130,8 +134,10 @@ day. Set these in `.env` (see `.env.example`):
 - `BACKUP_DIR`: where the files go on the server, `./backups` unless changed.
 - `BACKUP_RETENTION_DAYS`: older files in that folder are deleted, 30 unless changed.
 - `BACKUP_REMOTE`: optional copy to cloud storage, for example
-  `gs://my-bucket/greencats`. Put the service-account key at `secrets/gcs.json`
-  and set a lifecycle rule on the bucket to delete old files.
+  `gs://my-bucket/greencats`. Put the service-account key at `secrets/gcs.json`.
+  Copies there older than `BACKUP_RETENTION_DAYS` are deleted too, so the key needs
+  permission to create and delete objects (for example Storage Object Admin on the
+  bucket). A lifecycle rule on the bucket that deletes old files does the same.
 
 Run one now with `docker compose run --rm backup once`. To restore:
 

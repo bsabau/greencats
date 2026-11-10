@@ -14,6 +14,7 @@ import {
   placeholderHash,
   requirePermission,
   requireUser,
+  secureCookie,
   startSession,
   verifyPassword,
 } from "@/lib/auth";
@@ -38,7 +39,8 @@ const fail = (to: string, code: string): never => redirect(`${to}${to.includes("
 const saved = (to: string): never => redirect(`${to}${to.includes("?") ? "&" : "?"}saved=1`);
 /** Only paths inside this app. "//host" and "/\\host" would send the browser to another site. */
 const safeBack = (back: string | null | undefined, fallback: string) =>
-  back && /^\/(?![/\\])/.test(back) ? back : fallback;
+  // Browsers drop tabs and line breaks from URLs, so "/\t/host" would become "//host".
+  back && /^\/(?![/\\])/.test(back) && !/[\u0000-\u001f\u007f]/.test(back) ? back : fallback;
 const isUuid = (v: string) => /^[0-9a-f-]{36}$/i.test(v);
 
 // ---- Account --------------------------------------------------------------------
@@ -72,14 +74,15 @@ export async function login(fd: FormData) {
 
 export async function logout() {
   await endSession();
-  redirect("/login");
+  // That page tells the browser to forget the photos and pages it kept, then goes to the login.
+  redirect("/signed-out");
 }
 
 export async function setLanguage(fd: FormData) {
   const user = await requireUser({ allowPasswordChange: true });
   const locale = oneOf(fd, "locale", ["ro", "en"] as const, "ro");
   await db.update(s.users).set({ locale }).where(eq(s.users.id, user.id));
-  (await cookies()).set("locale", locale, { sameSite: "lax", path: "/", maxAge: 31_536_000 });
+  (await cookies()).set("locale", locale, { sameSite: "lax", secure: secureCookie(), path: "/", maxAge: 31_536_000 });
   redirect(safeBack(text(fd, "back"), "/account"));
 }
 
@@ -169,6 +172,7 @@ const PRIVATE_IN_LOG = new Set<string>([...ANIMAL_TEXT_FIELDS, "microchip"]);
 
 export async function updateAnimal(id: string, fd: FormData) {
   const user = await requirePermission("animals:edit");
+  if (!isUuid(id)) fail("/animals", "invalid");
   const fields = animalFields(fd);
   const to = `/animals/${id}`;
   if (!fields.name) fail(to, "invalid");
@@ -244,6 +248,7 @@ const MEDICAL_KINDS = s.medicalKindEnum.enumValues;
 
 export async function addMedicalRecord(animalId: string, fd: FormData) {
   const user = await requirePermission("medical:edit");
+  if (!isUuid(animalId)) fail("/animals", "invalid");
   const to = `/animals/${animalId}?tab=medical`;
   const kind = oneOf(fd, "kind", MEDICAL_KINDS, "note");
   const on = date(fd, "date");
@@ -315,7 +320,11 @@ export async function undoComplete(recordId: string, back: string) {
   const [record] = isUuid(recordId) ? await db.select().from(s.medicalRecords).where(eq(s.medicalRecords.id, recordId)) : [];
   if (record && record.createdBy === user.id) {
     await db.delete(s.medicalRecords).where(eq(s.medicalRecords.id, recordId));
-    if (record.kind === "sterilization") {
+    // Undoing one sterilization record says nothing if another one remains.
+    const [{ others }] = record.kind === "sterilization"
+      ? await db.select({ others: count() }).from(s.medicalRecords).where(and(eq(s.medicalRecords.animalId, record.animalId), eq(s.medicalRecords.kind, "sterilization")))
+      : [{ others: 1 }];
+    if (others === 0) {
       await db.update(s.animals).set({ sterilized: "no", updatedAt: new Date() }).where(eq(s.animals.id, record.animalId));
     }
     await audit(user.id, "medical.undo", "animal", record.animalId, { record: recordId, kind: record.kind });
@@ -474,6 +483,7 @@ export async function createEvent(fd: FormData) {
 
 async function loadOwnedEvent(id: string) {
   const user = await requirePermission("calendar:edit");
+  if (!isUuid(id)) fail("/calendar", "invalid");
   const [event] = await db.select().from(s.calendarEvents).where(eq(s.calendarEvents.id, id));
   if (!event) redirect("/calendar");
   if (event.createdBy !== user.id && !can(user, "calendar:manage_all")) fail(`/calendar/${id}`, "denied");
@@ -489,23 +499,26 @@ export async function deleteEvent(id: string) {
 
 export async function signUpForShift(eventId: string) {
   const user = await requirePermission("calendar:edit");
+  if (!isUuid(eventId)) fail("/calendar", "invalid");
   const to = `/calendar/${eventId}`;
-  const full = await db.transaction(async (tx) => {
+  const problem = await db.transaction(async (tx) => {
     // Lock the event row so two people can't take the last place at the same moment.
     const [event] = await tx.select().from(s.calendarEvents).where(eq(s.calendarEvents.id, eventId)).for("update");
-    if (!event) return true;
+    // Only shifts take sign-ups.
+    if (!event || event.type !== "shift") return "invalid";
     const [{ taken }] = await tx.select({ taken: count() }).from(s.shiftSignups).where(eq(s.shiftSignups.eventId, eventId));
-    if (event.capacity !== null && taken >= event.capacity) return true;
+    if (event.capacity !== null && taken >= event.capacity) return "shift_full";
     await tx.insert(s.shiftSignups).values({ eventId, userId: user.id }).onConflictDoNothing();
-    return false;
+    return null;
   });
-  if (full) fail(to, "shift_full");
+  if (problem) fail(to, problem);
   await audit(user.id, "shift.signup", "event", eventId);
   redirect(to);
 }
 
 export async function withdrawFromShift(eventId: string) {
   const user = await requirePermission("calendar:edit");
+  if (!isUuid(eventId)) fail("/calendar", "invalid");
   await db.delete(s.shiftSignups).where(and(eq(s.shiftSignups.eventId, eventId), eq(s.shiftSignups.userId, user.id)));
   await audit(user.id, "shift.withdraw", "event", eventId);
   redirect(`/calendar/${eventId}`);
@@ -582,6 +595,7 @@ function visibilityFields(fd: FormData) {
 
 export async function saveVisibility(id: string | null, fd: FormData) {
   const user = await requirePermission("visibility:edit");
+  if (id && !isUuid(id)) fail("/visibility", "invalid");
   const fields = visibilityFields(fd);
   if (!fields.animalName) fail("/visibility", "invalid");
   if (id) await db.update(s.visibilityCases).set({ ...fields, updatedAt: new Date() }).where(eq(s.visibilityCases.id, id));
@@ -593,6 +607,7 @@ export async function saveVisibility(id: string | null, fd: FormData) {
 // ---- Review queue ---------------------------------------------------------------
 export async function resolveIssue(id: string) {
   const user = await requirePermission("review:manage");
+  if (!isUuid(id)) fail("/review", "invalid");
   await db.update(s.importIssues).set({ resolved: true }).where(eq(s.importIssues.id, id));
   await audit(user.id, "issue.resolve", "issue", id);
   redirect("/review");
@@ -600,6 +615,7 @@ export async function resolveIssue(id: string) {
 
 export async function assignPhoto(photoId: string, fd: FormData) {
   const user = await requirePermission("review:manage");
+  if (!isUuid(photoId)) fail("/review", "invalid");
   const animalId = uuid(fd, "animalId");
   if (!animalId) fail("/review", "invalid");
   await db.update(s.photos).set({ animalId }).where(eq(s.photos.id, photoId));
@@ -635,30 +651,42 @@ export async function createUser(fd: FormData) {
   saved("/admin/users");
 }
 
+/**
+ * Changes an account while holding the rows of the active admins, so two admins removing each other
+ * at the same moment can't leave none. `removesAdmin`: the change may take this account's admin rights away.
+ * Returns false, changing nothing, when it would remove the last active admin.
+ */
+async function keepingAnAdmin(id: string, removesAdmin: boolean, change: (tx: Parameters<Parameters<typeof db.transaction>[0]>[0]) => Promise<unknown>) {
+  return db.transaction(async (tx) => {
+    const admins = await tx.select({ id: s.users.id }).from(s.users).where(and(eq(s.users.role, "admin"), eq(s.users.active, true))).for("update");
+    if (removesAdmin && admins.length > 0 && admins.every((a) => a.id === id)) return false;
+    await change(tx);
+    return true;
+  });
+}
+
 export async function updateUser(id: string, fd: FormData) {
   const admin = await requirePermission("users:manage");
+  if (!isUuid(id)) fail("/admin/users", "invalid");
   const role = oneOf(fd, "role", ROLES, "volunteer");
   const active = fd.get("active") === "on";
-  if (role !== "admin" || !active) {
-    const [{ others }] = await db
-      .select({ others: count() })
-      .from(s.users)
-      .where(and(eq(s.users.role, "admin"), eq(s.users.active, true), ne(s.users.id, id)));
-    if (others === 0) fail("/admin/users", "last_admin");
-  }
   const password = text(fd, "password");
   if (password && password.length < MIN_PASSWORD) fail("/admin/users", "password_short");
   if (password && password.length > MAX_PASSWORD) fail("/admin/users", "password_long");
-  await db
-    .update(s.users)
-    .set({
-      role,
-      active,
-      ownsAdoptions: fd.get("ownsAdoptions") === "on",
-      ownsVisibility: fd.get("ownsVisibility") === "on",
-      ...(password ? { passwordHash: await hashPassword(password), mustChangePassword: true } : {}),
-    })
-    .where(eq(s.users.id, id));
+  const passwordHash = password ? await hashPassword(password) : null;
+  const done = await keepingAnAdmin(id, role !== "admin" || !active, (tx) =>
+    tx
+      .update(s.users)
+      .set({
+        role,
+        active,
+        ownsAdoptions: fd.get("ownsAdoptions") === "on",
+        ownsVisibility: fd.get("ownsVisibility") === "on",
+        ...(passwordHash ? { passwordHash, mustChangePassword: true } : {}),
+      })
+      .where(eq(s.users.id, id)),
+  );
+  if (!done) fail("/admin/users", "last_admin");
   if (password || !active) await db.delete(s.sessions).where(eq(s.sessions.userId, id));
   await audit(admin.id, "user.update", "user", id, { role, active, passwordReset: Boolean(password) });
   saved("/admin/users");
@@ -670,7 +698,8 @@ export async function deleteUser(id: string) {
   if (!isUuid(id) || id === admin.id) fail("/admin/users", "invalid");
   const [target] = await db.select({ role: s.users.role, active: s.users.active }).from(s.users).where(eq(s.users.id, id));
   if (!target) redirect("/admin/users");
-  await db.delete(s.users).where(eq(s.users.id, id));
+  const done = await keepingAnAdmin(id, true, (tx) => tx.delete(s.users).where(eq(s.users.id, id)));
+  if (!done) fail("/admin/users", "last_admin");
   // The address is left out, so the log doesn't keep what was just removed.
   await audit(admin.id, "user.delete", "user", id, { role: target.role });
   saved("/admin/users");

@@ -43,6 +43,9 @@ run_once() {
     # Only encrypted files leave the server.
     rclone copy "$dir" "$remote" --include 'db-*.dump.gpg' --include 'photos-*.tar.gz.gpg' --max-depth 1
     echo "Copied to $BACKUP_REMOTE."
+    # The copies there are kept as long as the ones here, for the same reason.
+    rclone delete "$remote" --include 'db-*.dump.gpg' --include 'photos-*.tar.gz.gpg' --max-depth 1 --min-age "${keep_days}d" \
+      || echo "Old copies at $BACKUP_REMOTE could not be deleted. The key needs permission to delete, or set a lifecycle rule." >&2
   fi
 }
 

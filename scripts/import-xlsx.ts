@@ -5,10 +5,12 @@
  *
  * Nothing is silently dropped: original wording is stored beside parsed values,
  * and anything uncertain becomes a row on the app's Review page.
- * --replace wipes shelter data first (user accounts are kept).
+ * --replace wipes shelter data first (user accounts are kept). It asks to type the number of animals
+ * that will be erased; --yes-erase-shelter-data skips the question, for scripts.
  */
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, unlink, writeFile } from "node:fs/promises";
+import { createInterface } from "node:readline/promises";
 import path from "node:path";
 import ExcelJS from "exceljs";
 import { sql } from "drizzle-orm";
@@ -39,6 +41,29 @@ const file = args.find((a) => !a.startsWith("--"));
 const replace = args.includes("--replace");
 if (!file) throw new Error("Usage: npm run import -- <file.xlsx> [--replace]");
 const uploadDir = process.env.UPLOAD_DIR ?? "./uploads";
+
+// Replacing erases everything entered in the app since the last import, so it is confirmed first.
+if (replace) {
+  const [{ existing }] = await db.select({ existing: sql<number>`count(*)::int` }).from(s.animals);
+  if (existing > 0 && !args.includes("--yes-erase-shelter-data")) {
+    const warning =
+      `--replace erases all ${existing} animals, people, medical records, cases, events and photos entered in the app.\n` +
+      "Take a backup first: docker compose run --rm backup once";
+    let confirmed = false;
+    if (process.stdin.isTTY) {
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      confirmed = (await rl.question(`${warning}\nType ${existing} to continue: `)).trim() === String(existing);
+      rl.close();
+    } else {
+      console.error(`${warning}\nRun it in a terminal to confirm, or add --yes-erase-shelter-data.`);
+    }
+    if (!confirmed) {
+      console.error("Nothing was changed.");
+      await pg.end();
+      process.exit(1);
+    }
+  }
+}
 
 const wb = new ExcelJS.Workbook();
 await wb.xlsx.readFile(file);
@@ -647,6 +672,17 @@ await db.transaction(async (tx) => {
 
 await mkdir(uploadDir, { recursive: true });
 for (const f of photoFiles) await writeFile(path.join(uploadDir, f.fileName), f.buffer);
+if (replace) {
+  // The old photos' rows were erased with the rest, so their files would stay on disk forever.
+  const kept = new Set((await db.select({ fileName: s.photos.fileName }).from(s.photos)).map((p) => p.fileName));
+  let removed = 0;
+  for (const name of await readdir(uploadDir)) {
+    if (kept.has(name) || name.startsWith(".")) continue;
+    await unlink(path.join(uploadDir, name));
+    removed += 1;
+  }
+  if (removed) console.log(`Removed ${removed} photo files of the replaced data.`);
+}
 
 const byStatus = animals.reduce<Record<string, number>>((acc, a) => ({ ...acc, [a.status!]: (acc[a.status!] ?? 0) + 1 }), {});
 console.log(JSON.stringify({
