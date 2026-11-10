@@ -368,6 +368,26 @@ test("data protection: erase a person, delete a cat and an account, and limits o
   await page.click('button:has-text("Salvează")');
   await expect(page.locator("h1")).toHaveText(personName);
   await expect(page.locator("main")).toContainText("contract de test");
+  const personId = new URL(page.url()).pathname.split("/").pop()!;
+
+  // An adoption case typed with this person's name is linked to them. Changing the adopter
+  // moves the link, so the old person's data export and erasure no longer reach the case.
+  await page.goto("/adoptions");
+  await page.click('summary:has-text("Caz nou")');
+  const newCase = page.locator("details[open] form").first();
+  await newCase.locator('input[name="animalName"]').fill(`QA Adoptie ${run}`);
+  await newCase.locator('input[name="adopterName"]').fill(personName);
+  await newCase.locator('button:has-text("Salvează")').click();
+  await expect(page.locator("main")).toContainText(`QA Adoptie ${run}`);
+  expect(JSON.stringify(await (await page.request.get(`/export/person/${personId}`)).json())).toContain(`QA Adoptie ${run}`);
+  const caseRow = page.locator("li", { hasText: `QA Adoptie ${run}` });
+  await caseRow.locator('summary:has-text("Modifică")').click();
+  await caseRow.locator('input[name="adopterName"]').fill(`QA Alt Adoptator ${run}`);
+  await caseRow.locator('button:has-text("Salvează")').click();
+  await expect(page.locator("main")).toContainText(`QA Alt Adoptator ${run}`);
+  expect(JSON.stringify(await (await page.request.get(`/export/person/${personId}`)).json())).not.toContain(`QA Adoptie ${run}`);
+  await page.goto(`/people/${personId}`);
+
   await confirm("Șterge datele persoanei");
   await expect(page.locator("h1")).toHaveText("Persoană ștearsă");
   await expect(page.locator("main")).not.toContainText("700");
@@ -379,6 +399,27 @@ test("data protection: erase a person, delete a cat and an account, and limits o
   const vol = await context.newPage();
   await signIn(vol, volunteer.email, volunteer.next);
   await expect(vol).toHaveURL(/\/$/);
+  // A field holding a phone the volunteer can't see is read-only for them, and saving
+  // the form keeps the real text instead of the "hidden" marker.
+  await page.goto(cat.href);
+  await page.click('button:has-text("Modifică detaliile")');
+  const adminForm = page.locator('form:has(input[name="color"])');
+  await adminForm.locator('input[name="color"]').fill("tabby, 0740000150");
+  await adminForm.locator('button:has-text("Salvează")').click();
+  await expect(page.locator('.toast-in[role="status"]')).toBeVisible();
+  await vol.goto(cat.href);
+  await vol.click('button:has-text("Modifică detaliile")');
+  const volForm = vol.locator('form:has(input[name="color"])');
+  await expect(volForm.locator('input[name="color"]')).toBeDisabled();
+  await expect(volForm.locator('input[name="color"]')).not.toHaveValue(/0740000150/);
+  await volForm.locator('textarea[name="otherInfo"]').fill(`QA nota voluntar ${run}`);
+  await volForm.locator('button:has-text("Salvează")').click();
+  await expect(vol.locator('.toast-in[role="status"]')).toBeVisible();
+  await page.goto(cat.href);
+  await page.click('button:has-text("Modifică detaliile")');
+  await expect(adminForm.locator('input[name="color"]')).toHaveValue("tabby, 0740000150");
+  await expect(adminForm.locator('textarea[name="otherInfo"]')).toHaveValue(`QA nota voluntar ${run}`);
+
   await vol.goto(`${cat.href}?tab=medical`);
   await expect(vol.locator("#medical")).toContainText("2027");
   await expect(vol.locator('#medical button[aria-label="Șterge"]')).toHaveCount(0);

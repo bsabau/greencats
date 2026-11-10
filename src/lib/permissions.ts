@@ -70,6 +70,19 @@ export function redactPhones<T extends string | null | undefined>(actor: Actor, 
   return text.replace(PHONE, REDACTED).replace(EMAIL, REDACTED_EMAIL) as T;
 }
 
+/** True when the actor would see part of this text hidden. */
+export const hasHidden = (actor: Actor, text: string | null | undefined): boolean => !!text && redactPhones(actor, text) !== text;
+
+/** Every text field of an animal a person can type into, so a number written in an unexpected box stays hidden too. */
+export const ANIMAL_TEXT_FIELDS = [
+  "locationNote", "currentTreatment", "intakeHistory", "medicalSummary", "otherInfo", "refillNotes", "deathNote",
+  "contractText", "birthText", "intakeText", "sterilizedText", "color", "healthBookNo", "passport",
+] as const;
+/** The ones the edit form changes. One holding hidden text can't be edited by someone who can't see it. */
+export const ANIMAL_EDITABLE_TEXT_FIELDS = [
+  "color", "healthBookNo", "passport", "locationNote", "currentTreatment", "intakeHistory", "medicalSummary", "otherInfo",
+] as const;
+
 /** Applies the same hiding to every named text field of a row, so a page can't forget one. */
 export function redactFields<T extends object>(actor: Actor, row: T, keys: readonly (keyof T)[]): T {
   if (can(actor, "contacts:view_full")) return row;

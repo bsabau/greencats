@@ -9,7 +9,7 @@ import { db, schema as s } from "@/db";
 import { getI18n, type Key } from "@/i18n";
 import { requireUser } from "@/lib/auth";
 import { ageInMonths, addDays, todayIso } from "@/lib/dates";
-import { can, redactFields, redactPhones } from "@/lib/permissions";
+import { ANIMAL_EDITABLE_TEXT_FIELDS, ANIMAL_TEXT_FIELDS, can, hasHidden, redactFields, redactPhones } from "@/lib/permissions";
 import { AnimalFields } from "../fields";
 
 const TABS = ["overview", "medical", "placements", "photos"] as const;
@@ -28,11 +28,8 @@ export default async function AnimalPage({ params, searchParams }: { params: Pro
   const tab: TabName = TABS.includes(sp.tab as TabName) ? (sp.tab as TabName) : "overview";
   const [stored] = await db.select().from(s.animals).where(eq(s.animals.id, id));
   if (!stored) notFound();
-  // Every text field a person can type into, so a number written in an unexpected box stays hidden too.
-  const animal = redactFields(user, stored, [
-    "locationNote", "currentTreatment", "intakeHistory", "medicalSummary", "otherInfo", "refillNotes", "deathNote",
-    "contractText", "birthText", "intakeText", "sterilizedText", "color", "healthBookNo", "passport",
-  ]);
+  const animal = redactFields(user, stored, ANIMAL_TEXT_FIELDS);
+  const locked = ANIMAL_EDITABLE_TEXT_FIELDS.filter((key) => hasHidden(user, stored[key]));
 
   const [medical, placements, photos, issues, people, products, clinics, locations] = await Promise.all([
     db.select().from(s.medicalRecords).where(eq(s.medicalRecords.animalId, id)).orderBy(sql`${s.medicalRecords.date} desc nulls last`),
@@ -122,7 +119,7 @@ export default async function AnimalPage({ params, searchParams }: { params: Pro
             </ModalButton>
             <ModalButton label={t("animals.editDetails")} title={t("animals.editDetails")} closeLabel={closeLabel} className={btnGhost} icon={<Pencil aria-hidden className="h-4 w-4" />}>
               <form action={updateAnimal.bind(null, id)} className="space-y-4">
-                <AnimalFields t={t} values={animal} />
+                <AnimalFields t={t} values={animal} locked={locked} />
                 <SubmitButton>{t("common.save")}</SubmitButton>
               </form>
               {can(user, "animals:delete") && (
