@@ -3,27 +3,25 @@ import { randomUUID } from "node:crypto";
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { and, count, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
-import sharp from "sharp";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { db, schema as s } from "@/db";
 import {
   audit,
-  clearLoginFailures,
   deleteDeadSessions,
   endSession,
   hashPassword,
-  loginBlocked,
   placeholderHash,
-  recordLoginFailure,
   requirePermission,
   requireUser,
   startSession,
   verifyPassword,
 } from "@/lib/auth";
 import { addDays, todayIso } from "@/lib/dates";
-import { date, int, oneOf, text, time, uuid } from "@/lib/forms";
+import { loginLimit, passwordChangeBlocked, recordLoginFailure, recordLoginSuccess, recordPasswordChangeFailure } from "@/lib/login-limits";
+import { MAX_NAME, date, int, oneOf, text, time, uuid } from "@/lib/forms";
 import { linkMedicalRecords } from "@/lib/catalog";
+import { cleanPhoto } from "@/lib/photos";
 import { PRODUCT_KINDS, nextDue } from "@/lib/medical-schedule";
 import { normalizeTerm, parseAliases } from "@/lib/product-match";
 import { ANIMAL_EDITABLE_TEXT_FIELDS, ANIMAL_TEXT_FIELDS, can, hasHidden } from "@/lib/permissions";
@@ -32,6 +30,8 @@ import { getPeoplePastRetention, purgeOldAuditEntries } from "@/lib/retention";
 import { parsePhones } from "@/lib/import-helpers";
 
 const MIN_PASSWORD = 12;
+const MAX_PASSWORD = 1000;
+const MAX_ALIASES = 50;
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
 const uploadDir = () => process.env.UPLOAD_DIR ?? "./uploads";
 const fail = (to: string, code: string): never => redirect(`${to}${to.includes("?") ? "&" : "?"}error=${code}`);
@@ -43,11 +43,11 @@ const isUuid = (v: string) => /^[0-9a-f-]{36}$/i.test(v);
 
 // ---- Account --------------------------------------------------------------------
 export async function login(fd: FormData) {
-  const email = (text(fd, "email") ?? "").toLowerCase().slice(0, 200);
-  const password = (text(fd, "password") ?? "").slice(0, 1000);
+  const email = (text(fd, "email", MAX_NAME) ?? "").toLowerCase();
+  const password = (text(fd, "password") ?? "").slice(0, MAX_PASSWORD);
   // Behind Caddy this header holds the visitor's address. Caddy discards any value the visitor sent.
   const ip = (await headers()).get("x-forwarded-for")?.split(",")[0].trim() ?? "local";
-  if (loginBlocked(email, ip)) fail("/login", "locked");
+  if (loginLimit(email, ip) === "blocked") fail("/login", "locked");
   const [user] = await db.select().from(s.users).where(eq(s.users.email, email));
   // Check a placeholder hash for unknown accounts, so response time doesn't reveal which emails exist.
   const ok = await verifyPassword(user?.passwordHash ?? (await placeholderHash()), password);
@@ -58,7 +58,7 @@ export async function login(fd: FormData) {
     fail("/login", "login");
     return;
   }
-  clearLoginFailures(email, ip);
+  recordLoginSuccess(email, ip);
   // A password shorter than the minimum can only come from outside the app. It must be replaced,
   // unless this is a local trial stack that says so.
   const weak = password.length < MIN_PASSWORD && process.env.ALLOW_WEAK_PASSWORDS !== "true";
@@ -86,8 +86,13 @@ export async function setLanguage(fd: FormData) {
 export async function changePassword(fd: FormData) {
   const user = await requireUser({ allowPasswordChange: true });
   const next = text(fd, "next") ?? "";
-  if (next.length < MIN_PASSWORD || next.length > 1000) fail("/account", "password_short");
-  if (!(await verifyPassword(user.passwordHash, text(fd, "current") ?? ""))) fail("/account", "password_wrong");
+  if (next.length < MIN_PASSWORD) fail("/account", "password_short");
+  if (next.length > MAX_PASSWORD) fail("/account", "password_long");
+  if (passwordChangeBlocked(user.id)) fail("/account", "locked");
+  if (!(await verifyPassword(user.passwordHash, (text(fd, "current") ?? "").slice(0, MAX_PASSWORD)))) {
+    recordPasswordChangeFailure(user.id);
+    fail("/account", "password_wrong");
+  }
   await db.update(s.users).set({ passwordHash: await hashPassword(next), mustChangePassword: false }).where(eq(s.users.id, user.id));
   await db.delete(s.sessions).where(eq(s.sessions.userId, user.id));
   await startSession(user.id, user.locale);
@@ -103,7 +108,7 @@ const SPECIES = s.speciesEnum.enumValues;
 
 function animalFields(fd: FormData) {
   return {
-    name: text(fd, "name") ?? "",
+    name: text(fd, "name", MAX_NAME) ?? "",
     species: oneOf(fd, "species", SPECIES, "cat"),
     sex: oneOf(fd, "sex", SEXES, "unknown"),
     color: text(fd, "color"),
@@ -346,39 +351,33 @@ export async function deleteAnimal(id: string) {
   saved("/animals");
 }
 
-function imageType(b: Buffer): { ext: string; type: string; format: "png" | "jpeg" | "webp" } | null {
-  if (b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return { ext: "png", type: "image/png", format: "png" };
-  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return { ext: "jpg", type: "image/jpeg", format: "jpeg" };
-  if (b.subarray(0, 4).toString() === "RIFF" && b.subarray(8, 12).toString() === "WEBP") return { ext: "webp", type: "image/webp", format: "webp" };
-  return null;
-}
-
 export async function uploadPhoto(animalId: string, fd: FormData) {
   const user = await requirePermission("animals:edit");
+  if (!isUuid(animalId)) fail("/animals", "invalid");
   const to = `/animals/${animalId}?tab=photos`;
+  const [animal] = await db.select({ id: s.animals.id }).from(s.animals).where(eq(s.animals.id, animalId));
+  if (!animal) fail("/animals", "invalid");
   const file = fd.get("photo");
   if (!(file instanceof File) || file.size === 0 || file.size > MAX_PHOTO_BYTES) {
     fail(to, "photo");
     return;
   }
-  if (!isUuid(animalId)) fail("/animals", "invalid");
-  const original = Buffer.from(await file.arrayBuffer());
-  const kind = imageType(original);
-  if (!kind) {
+  const photo = await cleanPhoto(Buffer.from(await file.arrayBuffer()));
+  if (!photo) {
     fail(to, "photo");
     return;
   }
-  // Re-encoding drops everything a phone embeds in a photo, including where it was taken.
-  // rotate() first applies the stored orientation, so the picture stays the right way up.
-  const buffer = await sharp(original).rotate().toFormat(kind.format).toBuffer().catch(() => null);
-  if (!buffer) {
-    fail(to, "photo");
-    return;
-  }
-  const fileName = `${randomUUID()}.${kind.ext}`;
+  const fileName = `${randomUUID()}.${photo.ext}`;
+  const filePath = path.join(/*turbopackIgnore: true*/ uploadDir(), fileName);
   await mkdir(/*turbopackIgnore: true*/ uploadDir(), { recursive: true });
-  await writeFile(/*turbopackIgnore: true*/ path.join(/*turbopackIgnore: true*/ uploadDir(), fileName), buffer);
-  await db.insert(s.photos).values({ animalId, fileName, contentType: kind.type });
+  await writeFile(/*turbopackIgnore: true*/ filePath, photo.buffer);
+  try {
+    await db.insert(s.photos).values({ animalId, fileName, contentType: photo.type });
+  } catch (error) {
+    // No row points to the file, so nothing would ever delete it.
+    await unlink(/*turbopackIgnore: true*/ filePath).catch(() => {});
+    throw error;
+  }
   await audit(user.id, "photo.upload", "animal", animalId);
   saved(to);
 }
@@ -386,7 +385,7 @@ export async function uploadPhoto(animalId: string, fd: FormData) {
 // ---- People ---------------------------------------------------------------------
 function personFields(fd: FormData) {
   return {
-    name: text(fd, "name") ?? "",
+    name: text(fd, "name", MAX_NAME) ?? "",
     phones: (text(fd, "phones") ?? "").split(",").flatMap((p) => parsePhones(p)),
     email: text(fd, "email"),
     address: text(fd, "address"),
@@ -447,7 +446,7 @@ const MAX_REPEAT_WEEKS = 26;
 
 export async function createEvent(fd: FormData) {
   const user = await requirePermission("calendar:edit");
-  const title = text(fd, "title");
+  const title = text(fd, "title", MAX_NAME);
   const startOn = date(fd, "startOn");
   if (!title || !startOn) {
     fail("/calendar/new", "invalid");
@@ -515,8 +514,8 @@ export async function withdrawFromShift(eventId: string) {
 // ---- Adoption and visibility cases ----------------------------------------------
 function adoptionFields(fd: FormData) {
   return {
-    animalName: text(fd, "animalName") ?? "",
-    adopterName: text(fd, "adopterName"),
+    animalName: text(fd, "animalName", MAX_NAME) ?? "",
+    adopterName: text(fd, "adopterName", MAX_NAME),
     stage: oneOf(fd, "stage", s.adoptionStageEnum.enumValues, "paperwork"),
     healthBook: text(fd, "healthBook"),
     contractNo: text(fd, "contractNo"),
@@ -568,7 +567,7 @@ export async function saveAdoption(id: string | null, fd: FormData) {
 function visibilityFields(fd: FormData) {
   return {
     contactName: text(fd, "contactName"),
-    animalName: text(fd, "animalName") ?? "",
+    animalName: text(fd, "animalName", MAX_NAME) ?? "",
     photosRef: text(fd, "photosRef"),
     contractReceived: text(fd, "contractReceived"),
     readyForSite: text(fd, "readyForSite"),
@@ -613,11 +612,12 @@ const ROLES = s.roleEnum.enumValues;
 
 export async function createUser(fd: FormData) {
   const admin = await requirePermission("users:manage");
-  const email = (text(fd, "email") ?? "").toLowerCase();
-  const name = text(fd, "name");
+  const email = (text(fd, "email", MAX_NAME) ?? "").toLowerCase();
+  const name = text(fd, "name", MAX_NAME);
   const password = text(fd, "password") ?? "";
   if (!email.includes("@") || !name) fail("/admin/users", "invalid");
   if (password.length < MIN_PASSWORD) fail("/admin/users", "password_short");
+  if (password.length > MAX_PASSWORD) fail("/admin/users", "password_long");
   const [taken] = await db.select({ id: s.users.id }).from(s.users).where(eq(s.users.email, email));
   if (taken) fail("/admin/users", "email_taken");
   const [row] = await db
@@ -648,6 +648,7 @@ export async function updateUser(id: string, fd: FormData) {
   }
   const password = text(fd, "password");
   if (password && password.length < MIN_PASSWORD) fail("/admin/users", "password_short");
+  if (password && password.length > MAX_PASSWORD) fail("/admin/users", "password_long");
   await db
     .update(s.users)
     .set({
@@ -681,7 +682,8 @@ const MAX_INTERVAL_DAYS = 730;
 
 /** The spellings a product or clinic is recognised by: its name, plus what was typed. */
 function aliasesFrom(fd: FormData, name: string) {
-  return [...new Set([normalizeTerm(name), ...parseAliases(text(fd, "aliases"))])].filter(Boolean);
+  const typed = parseAliases(text(fd, "aliases")).map((alias) => alias.slice(0, 80)).slice(0, MAX_ALIASES);
+  return [...new Set([normalizeTerm(name), ...typed])].filter(Boolean);
 }
 
 export async function saveProduct(id: string | null, fd: FormData) {

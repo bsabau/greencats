@@ -46,6 +46,7 @@ export const ro = {
   "err.locked": "Prea multe încercări. Reveniți peste 15 minute.",
   "err.must_change": "Alegeți o parolă nouă înainte de a continua.",
   "err.password_short": "Parola trebuie să aibă cel puțin 12 caractere.",
+  "err.password_long": "Parola poate avea cel mult 1000 de caractere.",
   "err.password_wrong": "Parola actuală nu este corectă.",
   "err.email_taken": "Există deja un cont cu acest e-mail.",
   "err.photo": "Încărcați o imagine JPEG, PNG sau WebP de cel mult 10 MB.",
