@@ -127,6 +127,18 @@ gpg -d backups/db-YYYY-MM-DD.dump.gpg | docker compose exec -T db pg_restore -U 
 Restore photos by decrypting the matching `photos-*.tar.gz.gpg` and extracting it
 into the `uploads` volume.
 
+If the database password or the backup passphrase may have leaked, replace both while
+the stack is running:
+
+```sh
+bash scripts/rotate-secrets.sh
+```
+
+It writes new random values to `.env`, changes the database password, re-encrypts the
+backups in `backups/` with the new passphrase and restarts the stack. Copies already
+uploaded to `BACKUP_REMOTE` keep the old passphrase. Keep a copy of the new one
+somewhere else.
+
 ## Development
 
 ```sh
