@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   date,
   index,
   integer,
@@ -20,9 +21,9 @@ export const speciesEnum = pgEnum("species", ["cat", "dog"]);
 export const sexEnum = pgEnum("sex", ["f", "m", "unknown"]);
 export const sterilizedEnum = pgEnum("sterilized", ["yes", "no", "unknown"]);
 export const precisionEnum = pgEnum("date_precision", ["day", "month", "year"]);
+// "in_shelter" replaced the fixed places "casuta" and "ana_adi"; where in the shelter is animals.locationId.
 export const animalStatusEnum = pgEnum("animal_status", [
-  "casuta",
-  "ana_adi",
+  "in_shelter",
   "clinic",
   "foster",
   "foster_adoption",
@@ -136,11 +137,30 @@ export const animals = pgTable(
     otherInfo: text("other_info"),
     refillNotes: text("refill_notes"),
     locationNote: text("location_note"),
+    // Which shelter place, for animals "in_shelter" only.
+    locationId: uuid("location_id").references(() => locations.id, { onDelete: "restrict" }),
     profile: jsonb("profile").$type<Record<string, string>>(),
     createdAt: created(),
     updatedAt: updated(),
   },
-  (t) => [index("animals_status_idx").on(t.status), index("animals_name_idx").on(t.name)],
+  (t) => [
+    index("animals_status_idx").on(t.status),
+    index("animals_name_idx").on(t.name),
+    index("animals_location_idx").on(t.locationId),
+    check("animals_location_in_shelter", sql`${t.locationId} is null or ${t.status} = 'in_shelter'`),
+  ],
+);
+
+/** The places in the shelter where cats live. Edited on the Lists page. */
+export const locations = pgTable(
+  "locations",
+  {
+    id: id(),
+    name: text("name").notNull(),
+    active: boolean("active").notNull().default(true),
+    createdAt: created(),
+  },
+  (t) => [uniqueIndex("locations_name_idx").on(sql`lower(${t.name})`)],
 );
 
 export const people = pgTable(

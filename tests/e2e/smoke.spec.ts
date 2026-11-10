@@ -73,12 +73,78 @@ test("admin full journey", async ({ page }) => {
     await expect(page.locator("h1").first()).toBeVisible();
   }
 
+  // Two shelter locations, added on the Lists page.
+  const locA = `QA Loc A ${run}`;
+  const locB = `QA Loc B ${run}`;
+  const locationRow = (loc: string) => page.locator("li").filter({ has: page.locator("summary", { hasText: loc }) });
+  for (const loc of [locA, locB]) {
+    await page.goto("/admin/lists");
+    await page.click('summary:has-text("Locație nouă")');
+    const form = page.locator('details:has(summary:has-text("Locație nouă")) form');
+    await form.locator('input[name="name"]').fill(loc);
+    await form.locator("button").click();
+    await expect(page.getByRole("status")).toBeVisible();
+    await expect(locationRow(loc)).toContainText("0 animale acum");
+  }
+
+  // A new cat starts in the shelter, at the location chosen.
   await page.goto("/animals/new");
   const name = `QA Pisica ${run}`;
+  await expect(page.locator('select[name="status"]')).toHaveValue("in_shelter");
+  await page.locator('select[name="locationId"]').selectOption({ label: locB });
   await page.fill('input[name="name"]', name);
   await page.fill('input[name="birthDate"]', "2022-03-01");
   await page.click('button:has-text("Salvează")');
   await expect(page.locator("h1")).toHaveText(name);
+  await expect(page.locator("main section").first()).toContainText(`La ${locB}`);
+  const catPage = page.url().split("?")[0];
+
+  // Merging B into A moves the cat; the animals page gets a tab for A.
+  await page.goto("/admin/lists");
+  await locationRow(locB).locator("summary").click();
+  await locationRow(locB).locator('select[name="targetId"]').selectOption({ label: locA });
+  await locationRow(locB).locator('button:has-text("Unește")').click();
+  await expect(page.getByRole("status")).toBeVisible();
+  await expect(locationRow(locB)).toHaveCount(0);
+  await expect(locationRow(locA)).toContainText("un animal acum");
+  await page.goto("/animals");
+  await page.getByRole("button", { name: new RegExp(`La ${locA}`) }).click();
+  await expect(page.locator("main li a")).toHaveCount(1);
+  await expect(page.locator("main li a")).toContainText(name);
+
+  // An inactive location is still shown for the cat already there, but not offered for new cats.
+  await page.goto("/admin/lists");
+  await locationRow(locA).locator("summary").click();
+  await locationRow(locA).locator('input[name="active"]').uncheck();
+  await locationRow(locA).locator('button:has-text("Salvează")').click();
+  await expect(page.getByRole("status")).toBeVisible();
+  await expect(locationRow(locA)).toContainText("Inactiv");
+  await page.goto("/animals/new");
+  await expect(page.locator(`select[name="locationId"] option:has-text("${locA}")`)).toHaveCount(0);
+  await page.goto(catPage);
+  await page.click('button:has-text("Schimbă statutul")');
+  const toPlace = page.locator("dialog[open] form");
+  await expect(toPlace.locator('select[name="locationId"]')).toHaveValue(/.+/);
+  await expect(toPlace.locator(`select[name="locationId"] option:has-text("${locA}")`)).toHaveCount(1);
+  // Moving to another place in the shelter; the location field is only there for "in the shelter".
+  await toPlace.locator('select[name="locationId"]').selectOption({ label: "Căsuță" });
+  await toPlace.locator('button:has-text("Salvează")').click();
+  await expect(page.getByRole("status")).toBeVisible();
+  await expect(page.locator("main section").first()).toContainText("La Căsuță");
+  // "In the shelter" without a place is refused, even when the browser's check is bypassed.
+  await page.click('button:has-text("Schimbă statutul")');
+  await page.locator('dialog[open] select[name="locationId"]').evaluate((el) => {
+    const select = el as HTMLSelectElement;
+    select.required = false;
+    select.value = "";
+  });
+  await page.locator('dialog[open] button:has-text("Salvează")').click();
+  await expect(page.locator('.toast-in[role="alert"]')).toContainText("Alegeți locul din adăpost");
+  await expect(page.locator("main section").first()).toContainText("La Căsuță");
+  await page.click('button:has-text("Schimbă statutul")');
+  await page.locator('dialog[open] select[name="status"]').selectOption("clinic");
+  await expect(page.locator('dialog[open] select[name="locationId"]')).toHaveCount(0);
+  await page.locator("dialog[open]").press("Escape");
 
   // A status needing a person is refused without one.
   await page.click('button:has-text("Schimbă statutul")');

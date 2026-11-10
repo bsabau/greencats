@@ -1,5 +1,7 @@
 import { pg } from "@/db";
-import { getI18n, type Key } from "@/i18n";
+import { statusLabel } from "@/components/ui";
+import { CARE_STATUSES } from "@/domain/due";
+import { getI18n } from "@/i18n";
 import { currentUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -14,14 +16,14 @@ export async function GET(req: Request) {
   const like = `%${term.replace(/[\\%_]/g, "\\$&")}%`;
   // Names and microchips only. Searching phone numbers would reveal them to volunteers.
   const [animals, people] = await Promise.all([
-    pg<{ id: string; name: string; status: string }[]>`
-      select id, name, status::text from animals
-      where name ilike ${like} or array_to_string(aliases, ' ') ilike ${like} or microchip ilike ${like}
-      order by (status::text in ('casuta','ana_adi','clinic','foster','foster_adoption')) desc, name limit ${LIMIT}`,
+    pg<{ id: string; name: string; status: string; location: string | null }[]>`
+      select a.id, a.name, a.status::text, l.name location from animals a left join locations l on l.id = a.location_id
+      where a.name ilike ${like} or array_to_string(a.aliases, ' ') ilike ${like} or a.microchip ilike ${like}
+      order by (a.status::text in ${pg([...CARE_STATUSES])}) desc, a.name limit ${LIMIT}`,
     pg<{ id: string; name: string }[]>`select id, name from people where name ilike ${like} and erased_at is null order by name limit ${LIMIT}`,
   ]);
   return Response.json([
-    ...animals.map((a) => ({ href: `/animals/${a.id}`, title: a.name, subtitle: t(`status.${a.status}` as Key) })),
+    ...animals.map((a) => ({ href: `/animals/${a.id}`, title: a.name, subtitle: statusLabel(t, a.status, a.location) })),
     ...people.map((p) => ({ href: `/people/${p.id}`, title: p.name, subtitle: t("search.person") })),
   ]);
 }

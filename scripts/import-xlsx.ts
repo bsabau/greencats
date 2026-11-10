@@ -17,6 +17,7 @@ import { parseCellDate, parseDayMonth, splitEntries, extractDate, fold, type Cel
 import { nextDue, type MedicalKind } from "../src/lib/medical-schedule";
 import { stripPhones } from "../src/lib/permissions";
 import { linkMedicalRecords, recalculateDueDates, seedCatalog } from "../src/lib/catalog";
+import { ensureLocations, type SeedLocation } from "../src/lib/locations";
 import {
   containsPhone,
   nameKey,
@@ -76,7 +77,8 @@ const issues: Issue[] = [];
 const issue = (sheetName: string, row: number | null, field: string | null, raw: CellValue, message: string, animalId: string | null = null) =>
   issues.push({ sheet: sheetName, row, field, rawValue: str(raw), message, animalId });
 
-type Animal = typeof s.animals.$inferInsert & { id: string; aliases: string[]; fromSection: Status };
+// `place` is the workbook column an animal in the shelter was found in. It becomes locationId when written.
+type Animal = typeof s.animals.$inferInsert & { id: string; aliases: string[]; fromSection: Status; place?: SeedLocation };
 type Person = { id: string; name: string; phones: string[]; address: string | null; notes: string[]; fosterRating: Rating; externalCase: boolean };
 type Medical = typeof s.medicalRecords.$inferInsert;
 type Placement = { id: string; animalId: string; personId: string; kind: PlacementKind; startDate: string | null; startText: string | null; notes: string | null; open: boolean };
@@ -87,7 +89,7 @@ const indexAnimal = (a: Animal, label: string) => {
   const k = nameKey(label);
   if (k && !animalIndex.get(k)?.includes(a)) animalIndex.set(k, [...(animalIndex.get(k) ?? []), a]);
 };
-const ACTIVE: Status[] = ["casuta", "ana_adi", "clinic", "foster", "foster_adoption", "adoption_incomplete"];
+const ACTIVE: Status[] = ["in_shelter", "clinic", "foster", "foster_adoption", "adoption_incomplete"];
 
 function findAnimal(name: string, sheetName: string, row: number): Animal | null {
   const matches = animalIndex.get(nameKey(name)) ?? [];
@@ -159,7 +161,7 @@ function createUnmatched(name: string, sheetName: string, row: number): Animal {
   issue(sheetName, row, "Nume", name, "Animalul nu apare in Info medicale; a fost creat din aceasta foaie, fara istoric medical.", a.id);
   return a;
 }
-function setStatus(a: Animal, status: Status, sheetName: string, row: number) {
+function setStatus(a: Animal, status: Status, sheetName: string, row: number, place?: SeedLocation) {
   if (a.status === "deceased" && status !== "deceased") {
     issue(sheetName, row, "Statut", a.name, `Apare ca decedat in Info medicale, dar aici e activ (${status}). Am pastrat „decedat".`, a.id);
     return;
@@ -168,6 +170,7 @@ function setStatus(a: Animal, status: Status, sheetName: string, row: number) {
     issue(sheetName, row, "Statut", a.name, `Apare ca adoptat in Info medicale, dar in Inventar e ${status}. Am folosit Inventarul.`, a.id);
   }
   a.status = status;
+  a.place = place;
 }
 
 // ---- Info medicale: the primary list of animals ------------------------------
@@ -227,9 +230,9 @@ function addMedical(a: Animal, kind: MedicalKind, cell: CellValue, row: number, 
       : section === "dogs" ? "unknown"
       : c.startsWith("foster cu") ? "foster_adoption"
       : c.startsWith("foster") ? "foster"
-      : c.startsWith("casuta") ? "casuta"
-      : c.startsWith("ana") ? "ana_adi"
+      : c.startsWith("casuta") || c.startsWith("ana") ? "in_shelter"
       : "unknown";
+    const place: SeedLocation | undefined = status !== "in_shelter" ? undefined : c.startsWith("casuta") ? "casuta" : "ana_adi";
 
     const birthCell = val(ws, r, 3);
     const intakeCell = val(ws, r, 4);
@@ -242,6 +245,7 @@ function addMedical(a: Animal, kind: MedicalKind, cell: CellValue, row: number, 
     // A phone typed into a name would show on every list, so it moves to the notes, where it stays hidden from volunteers.
     const hasPhone = containsPhone(rawName);
     const a = createAnimal(hasPhone ? stripPhones(rawName) : rawName, status, {
+      place,
       species: section === "dogs" ? "dog" : "cat",
       color: str(val(ws, r, 5)),
       birthDate: birth?.date ?? null,
@@ -290,9 +294,9 @@ function addMedical(a: Animal, kind: MedicalKind, cell: CellValue, row: number, 
   for (let r = 2; r <= ws.rowCount; r++) {
     if (fold(str(val(ws, r, 3)) ?? "") === "cabinet") inClinic = true;
     const casuta = str(val(ws, r, 4));
-    if (casuta) resolveCats(casuta, name, r).forEach((a) => setStatus(a, inClinic ? "clinic" : "casuta", name, r));
+    if (casuta) resolveCats(casuta, name, r).forEach((a) => setStatus(a, inClinic ? "clinic" : "in_shelter", name, r, inClinic ? undefined : "casuta"));
     const anaAdi = str(val(ws, r, 8));
-    if (anaAdi) resolveCats(anaAdi, name, r).forEach((a) => setStatus(a, "ana_adi", name, r));
+    if (anaAdi) resolveCats(anaAdi, name, r).forEach((a) => setStatus(a, "in_shelter", name, r, "ana_adi"));
 
     const fosterCats = str(val(ws, r, 12));
     const fosterName = str(val(ws, r, 11));
@@ -608,7 +612,13 @@ await db.transaction(async (tx) => {
   if (replace) {
     await tx.execute(sql`truncate animals, people, placements, medical_records, adoption_cases, visibility_cases, calendar_events, shift_signups, photos, import_issues cascade`);
   }
-  for (const c of chunks(animals)) await tx.insert(s.animals).values(c.map(({ fromSection: _, ...a }) => a));
+  // Locations are kept across a re-import, like products and clinics. Only animals still in the shelter keep their place.
+  const locationIds = await ensureLocations(tx);
+  for (const c of chunks(animals)) {
+    await tx.insert(s.animals).values(c.map(({ fromSection: _, place, ...a }) => ({
+      ...a, locationId: a.status === "in_shelter" && place ? locationIds[place] : null,
+    })));
+  }
   for (const c of chunks(people)) {
     await tx.insert(s.people).values(c.map(({ notes, ...p }) => ({ ...p, notes: notes.join("\n") || null })));
   }
@@ -630,7 +640,9 @@ for (const f of photoFiles) await writeFile(path.join(uploadDir, f.fileName), f.
 
 const byStatus = animals.reduce<Record<string, number>>((acc, a) => ({ ...acc, [a.status!]: (acc[a.status!] ?? 0) + 1 }), {});
 console.log(JSON.stringify({
-  animals: animals.length, byStatus, people: people.length, placements: placements.length,
+  animals: animals.length, byStatus,
+  inShelterByPlace: animals.filter((a) => a.status === "in_shelter").reduce<Record<string, number>>((acc, a) => ({ ...acc, [a.place ?? "none"]: (acc[a.place ?? "none"] ?? 0) + 1 }), {}),
+  people: people.length, placements: placements.length,
   openPlacements: placements.filter((p) => p.open).length, medical: medical.length,
   medicalWithDueDate: medical.filter((m) => m.nextDueOn).length, adoptionCases: adoptionRows.length,
   visibilityCases: visibilityRows.length, events: events.length, photos: photos.length,

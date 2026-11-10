@@ -120,20 +120,42 @@ function animalFields(fd: FormData) {
   };
 }
 
+/**
+ * The shelter location sent with a status. Only "in_shelter" has one, and it is required
+ * unless no location is active. An inactive location is accepted only when it is the
+ * animal's current one, so re-saving doesn't drop it.
+ */
+async function locationFor(fd: FormData, status: string, current: string | null, to: string) {
+  if (status !== "in_shelter") return null;
+  const raw = text(fd, "locationId");
+  if (!raw) {
+    const [active] = await db.select({ id: s.locations.id }).from(s.locations).where(eq(s.locations.active, true)).limit(1);
+    if (active || current) fail(to, "location_required");
+    return null;
+  }
+  const locationId = isUuid(raw) ? raw : fail(to, "invalid");
+  const [location] = await db.select({ active: s.locations.active }).from(s.locations).where(eq(s.locations.id, locationId));
+  if (!location || (!location.active && locationId !== current)) fail(to, "invalid");
+  return locationId;
+}
+
 export async function createAnimal(fd: FormData) {
   const user = await requirePermission("animals:edit");
   const fields = animalFields(fd);
   if (!fields.name) fail("/animals/new", "invalid");
+  const status = oneOf(fd, "status", STATUSES, "in_shelter");
+  const locationId = await locationFor(fd, status, null, "/animals/new");
   const [row] = await db
     .insert(s.animals)
     .values({
       ...fields,
-      status: oneOf(fd, "status", STATUSES, "casuta"),
+      status,
+      locationId,
       birthPrecision: fields.birthDate ? "day" : null,
       intakePrecision: fields.intakeDate ? "day" : null,
     })
     .returning({ id: s.animals.id });
-  await audit(user.id, "animal.create", "animal", row.id, { name: fields.name });
+  await audit(user.id, "animal.create", "animal", row.id, { name: fields.name, status, locationId });
   redirect(`/animals/${row.id}`);
 }
 
@@ -187,6 +209,9 @@ export async function moveAnimal(id: string, fd: FormData) {
   const personId = uuid(fd, "personId");
   const kind = KIND_FOR_STATUS[status as keyof typeof KIND_FOR_STATUS];
   if (kind && !personId) fail(to, "person_required");
+  const [before] = await db.select({ locationId: s.animals.locationId }).from(s.animals).where(eq(s.animals.id, id));
+  if (!before) fail("/animals", "invalid");
+  const locationId = await locationFor(fd, status, before.locationId, to);
   await db.transaction(async (tx) => {
     await tx
       .update(s.placements)
@@ -197,10 +222,10 @@ export async function moveAnimal(id: string, fd: FormData) {
     }
     await tx
       .update(s.animals)
-      .set({ status, updatedAt: new Date(), ...(status === "deceased" ? { deathDate: on } : {}) })
+      .set({ status, locationId, updatedAt: new Date(), ...(status === "deceased" ? { deathDate: on } : {}) })
       .where(eq(s.animals.id, id));
   });
-  await audit(user.id, "animal.move", "animal", id, { status, on, personId });
+  await audit(user.id, "animal.move", "animal", id, { status, locationId, on, personId });
   saved(to);
 }
 
@@ -725,5 +750,41 @@ export async function mergeClinic(sourceId: string, fd: FormData) {
     await tx.delete(s.clinics).where(eq(s.clinics.id, source.id));
   });
   await audit(user.id, "clinic.merge", "clinic", target.id, { from: source.name, into: target.name });
+  saved(LISTS);
+}
+
+// ---- Lists: shelter locations ---------------------------------------------------
+export async function saveLocation(id: string | null, fd: FormData) {
+  const user = await requirePermission("lists:manage");
+  if (id && !isUuid(id)) fail(LISTS, "invalid");
+  const name = text(fd, "name")?.slice(0, 80) ?? "";
+  if (!name) fail(LISTS, "invalid");
+  const [sameName] = await db.select({ id: s.locations.id }).from(s.locations).where(sql`lower(${s.locations.name}) = lower(${name})`);
+  if (sameName && sameName.id !== id) fail(LISTS, "name_taken");
+  let locationId = id;
+  if (id) {
+    const [row] = await db.update(s.locations).set({ name, active: fd.get("active") === "on" }).where(eq(s.locations.id, id)).returning({ id: s.locations.id });
+    if (!row) fail(LISTS, "invalid");
+  } else {
+    [{ id: locationId }] = await db.insert(s.locations).values({ name }).returning({ id: s.locations.id });
+  }
+  await audit(user.id, id ? "location.update" : "location.create", "location", locationId, { name, active: id ? fd.get("active") === "on" : true });
+  saved(LISTS);
+}
+
+/** Moves every animal at one location to another, then removes the first. For duplicates. */
+export async function mergeLocation(sourceId: string, fd: FormData) {
+  const user = await requirePermission("lists:manage");
+  const targetId = uuid(fd, "targetId");
+  if (!isUuid(sourceId) || !targetId || targetId === sourceId) fail(LISTS, "invalid");
+  const [source] = await db.select().from(s.locations).where(eq(s.locations.id, sourceId));
+  const [target] = await db.select().from(s.locations).where(eq(s.locations.id, targetId!));
+  if (!source || !target) fail(LISTS, "invalid");
+  const moved = await db.transaction(async (tx) => {
+    const rows = await tx.update(s.animals).set({ locationId: target.id, updatedAt: new Date() }).where(eq(s.animals.locationId, source.id)).returning({ id: s.animals.id });
+    await tx.delete(s.locations).where(eq(s.locations.id, source.id));
+    return rows.length;
+  });
+  await audit(user.id, "location.merge", "location", target.id, { from: source.name, into: target.name, animals: moved });
   saved(LISTS);
 }

@@ -3,7 +3,14 @@
 ## Stare
 
 - **Etapa 1 (produse și clinici): făcută pe 10 noiembrie 2026.** Diferențe față de plan: un produs poate avea mai multe tipuri (de exemplu NexGard Combo, pentru deparazitare externă și internă), iar intervalele scurte pentru pui au prioritate și la deparazitarea internă, nu doar la vaccinul polivalent.
-- Etapa 2 (locații) și etapa 3: neîncepute.
+- **Etapa 2 (locații): făcută pe 10 noiembrie 2026**, pe ramura `etapa-2-locatii`. Diferențe față de plan:
+  - Tipul `animal_status` e recreat în migrare, nu extins cu `ADD VALUE`, deci `casuta` și `ana_adi` nu mai există deloc. O valoare adăugată cu `ADD VALUE` nu poate fi folosită în aceeași tranzacție, iar migratorul aplică toate migrările într-o singură tranzacție. drizzle-kit generează oricum recrearea când scoți valori din enum, iar mutarea datelor se face cât timp coloana e text.
+  - O constrângere în baza de date: `location_id` e completat doar când statutul e `in_shelter`. La orice alt statut, locația se golește.
+  - Locațiile pot fi și unite, ca produsele și clinicile: animalele trec pe locația aleasă. Ștergerea nu există.
+  - Eticheta de statut arată locul („La Căsuță”). Pagina Animale are câte o filă pe locație, Rapoartele numără pe locație, iar exportul CSV are o coloană `location`.
+  - Importul păstrează locațiile la `--replace` și le găsește după nume. Dacă „Căsuță” sau „Ana & Adi” sunt redenumite, un re-import le creează din nou cu numele vechi.
+  - Verificat pe registrul real: migrarea păstrează cele 389 de pisici, 21 ajung la Căsuță și 7 la Ana & Adi, iar un import de la zero dă exact același statut și aceeași locație pentru fiecare.
+- Etapa 3: neîncepută.
 
 ## Context
 

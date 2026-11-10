@@ -64,12 +64,15 @@ export function Badge({ tone = "gray", children }: { tone?: Tone; children: Reac
   return <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${TONES[tone]}`}>{children}</span>;
 }
 
-const STATUS_TONE: Record<string, Tone> = {
-  casuta: "green", ana_adi: "green", clinic: "red", foster: "blue", foster_adoption: "blue",
+export const STATUS_TONE: Record<string, Tone> = {
+  in_shelter: "green", clinic: "red", foster: "blue", foster_adoption: "blue",
   adoption_incomplete: "amber", adopted: "purple", deceased: "gray", external: "gray", unknown: "amber",
 };
-export const StatusBadge = ({ status, t }: { status: string; t: T }) => (
-  <Badge tone={STATUS_TONE[status] ?? "gray"}>{t(`status.${status}` as Key)}</Badge>
+/** "La Căsuță" for an animal in the shelter at a known place, otherwise the status name. */
+export const statusLabel = (t: T, status: string, location?: string | null) =>
+  status === "in_shelter" && location ? t("status.inShelterAt", { place: location }) : t(`status.${status}` as Key);
+export const StatusBadge = ({ status, location, t }: { status: string; location?: string | null; t: T }) => (
+  <Badge tone={STATUS_TONE[status] ?? "gray"}>{statusLabel(t, status, location)}</Badge>
 );
 
 export function Stat({ label, value, href, tone }: { label: string; value: number | string; href?: string; tone?: "alert" }) {
