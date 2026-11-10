@@ -1,6 +1,7 @@
 import "server-only";
 import { pg } from "@/db";
 import { sterilizationDue } from "@/lib/medical-schedule";
+import { redactPhones, type Actor } from "@/lib/permissions";
 
 export const CARE_STATUSES = ["in_shelter", "clinic", "foster", "foster_adoption"] as const;
 
@@ -17,8 +18,9 @@ export type DueItem = {
  * Everything needing action for animals in the shelter's care, from one place
  * so the dashboard, calendar and reports always agree. Only the newest record
  * of each kind counts, so giving a dose clears the reminder.
+ * An adoption case's cat name is typed by hand, so it is hidden like any other text for `actor`.
  */
-export async function getDueItems(range?: { from: string; to: string }): Promise<DueItem[]> {
+export async function getDueItems(actor: Actor, range?: { from: string; to: string }): Promise<DueItem[]> {
   const medical = await pg<{ animal_id: string; kind: string; next_due_on: string; name: string }[]>`
     select * from (
       select distinct on (m.animal_id, m.kind)
@@ -51,7 +53,7 @@ export async function getDueItems(range?: { from: string; to: string }): Promise
     })),
     ...adoptions.map((r) => ({
       key: `case:${r.id}`, kind: "adoption_step", dueOn: r.next_step_on,
-      animalId: r.animal_id ?? "", animalName: r.animal_name, source: "adoption" as const,
+      animalId: r.animal_id ?? "", animalName: redactPhones(actor, r.animal_name), source: "adoption" as const,
     })),
   ];
   return items

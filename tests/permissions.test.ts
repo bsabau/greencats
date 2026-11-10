@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { REDACTED, REDACTED_EMAIL, can, hasHidden, maskContact, redactFields, redactPhones, stripPhones, type Actor } from "../src/lib/permissions";
+import { REDACTED, REDACTED_EMAIL, can, hasHidden, maskContact, phonesIn, redactFields, redactPhones, stripPhones, type Actor } from "../src/lib/permissions";
 import { nextDue, sterilizationDue } from "../src/lib/medical-schedule";
 
 const volunteer: Actor = { role: "volunteer", ownsAdoptions: false, ownsVisibility: false };
@@ -69,12 +69,19 @@ describe("data protection permissions", () => {
 });
 
 describe("phone redaction in notes", () => {
-  it.each(["0740000113 - Wapp", "suna la 0 740 000 114 azi", "33(0)639980105", "+33 6 39 98 01 08", "(+40) 740 000 101"])("hides %s", (note) => {
+  it.each([
+    "0740000113 - Wapp", "suna la 0 740 000 114 azi", "33(0)639980105", "+33 6 39 98 01 08", "(+40) 740 000 101",
+    "0040 740 000 115", "0033 6 39 98 01 09", "740 000 116", "fix 021 312 34 56", "0264-123-456", "+44 20 7946 0958",
+    "+49 151 23456789", "tel.0740000117", "sunati la 0740000118.", "40 740 000 119",
+  ])("hides %s", (note) => {
     const out = redactPhones(volunteer, note);
     expect(out).toContain(REDACTED);
     expect(out.replace(REDACTED, "")).not.toMatch(/\d{3}/);
   });
-  it.each(["2026.08.31 FIV/Felv negativ", "carnet: B 60 19447", "CIP: 642090002330723", "Contract 1626/"])("keeps %s", (note) => {
+  it.each([
+    "2026.08.31 FIV/Felv negativ", "carnet: B 60 19447", "CIP: 642090002330723", "Contract 1626/", "cip 642 090 002 330 723",
+    "07.05.2026 14:30 control", "03.05.2026 10 ml", "greutate 3.2 kg, 0.5 ml", "2 x 250 mg",
+  ])("keeps %s", (note) => {
     expect(redactPhones(volunteer, note)).toBe(note);
   });
   it("shows notes unchanged to coordinators", () => {
@@ -86,6 +93,10 @@ describe("phone redaction in notes", () => {
     expect(hasHidden(volunteer, "tabby")).toBe(false);
     expect(hasHidden(volunteer, null)).toBe(false);
     expect(hasHidden(coordinator, "0740000150")).toBe(false);
+  });
+  it("finds the phones in a text", () => {
+    expect(phonesIn("Ion Popescu 0740 000 112 / +33 6 39 98 01 08")).toEqual(["0740 000 112", "+33 6 39 98 01 08"]);
+    expect(phonesIn("Ion Popescu")).toEqual([]);
   });
   it("cleans a phone out of a name", () => {
     expect(stripPhones("pisoiul fara ureche - Ion Popescu (0740000112)")).toBe("pisoiul fara ureche - Ion Popescu");

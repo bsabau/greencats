@@ -12,7 +12,7 @@ const Swatch = ({ color }: { color: string }) => <span aria-hidden className="in
 export default async function ReportsPage() {
   const user = await requireUser();
   const { t, fmtMonth, fmtMonthShort } = await getI18n();
-  const [{ byStatus, site, flow, paperwork }, due] = await Promise.all([getReportData(), getDueItems()]);
+  const [{ byStatus, site, flow, paperwork }, due] = await Promise.all([getReportData(), getDueItems(user)]);
   const today = todayIso();
   const in30 = addDays(today, 30);
   const kinds = [...new Set(due.filter((d) => d.source === "medical").map((d) => d.kind))].sort();

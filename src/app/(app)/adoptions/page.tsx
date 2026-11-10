@@ -6,7 +6,7 @@ import { Badge, Card, Field, Flash, Page, btn, btnGhost, inputCls } from "@/comp
 import { db, schema as s } from "@/db";
 import { getI18n, type Key, type T } from "@/i18n";
 import { requireUser } from "@/lib/auth";
-import { can, redactFields } from "@/lib/permissions";
+import { can, hideMicrochip, redactFields } from "@/lib/permissions";
 
 type Row = typeof s.adoptionCases.$inferSelect;
 
@@ -70,7 +70,7 @@ export default async function AdoptionsPage({ searchParams }: { searchParams: Pr
   const user = await requireUser();
   const { t, fmtDate } = await getI18n();
   const rows = (await db.select().from(s.adoptionCases).orderBy(asc(s.adoptionCases.animalName))).map((r) =>
-    redactFields(user, r, ["animalName", "adopterName", "healthBook", "contractNo", "vaccine", "microchip", "passport", "notes", "statusNote"]));
+    ({ ...redactFields(user, r, ["animalName", "adopterName", "healthBook", "contractNo", "vaccine", "microchip", "passport", "notes", "statusNote"]), microchip: docState(r.microchip) === "done" ? hideMicrochip(user, r.microchip) : r.microchip }));
   const editable = can(user, "adoptions:edit");
   const none = t("common.none");
   return (

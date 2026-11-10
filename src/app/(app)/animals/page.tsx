@@ -5,6 +5,7 @@ import { CARE_STATUSES } from "@/domain/due";
 import { getI18n, type Key } from "@/i18n";
 import { requireUser } from "@/lib/auth";
 import { ageInMonths, todayIso } from "@/lib/dates";
+import { HIDDEN } from "@/lib/permissions";
 import { fold } from "@/lib/text";
 import { AnimalBrowser, type BrowserCard, type Tab } from "./browser";
 
@@ -19,10 +20,10 @@ const tabOf = (c: { status: string; locationId: string | null }) =>
   c.status === "in_shelter" && c.locationId ? `place:${c.locationId}` : c.status;
 
 export default async function AnimalsPage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
-  await requireUser();
+  const user = await requireUser();
   const { t, fmtAge } = await getI18n();
   const params = await searchParams;
-  const cards = await getAnimalCards();
+  const cards = await getAnimalCards(user);
   const today = todayIso();
   const careSet = new Set<string>(CARE_STATUSES);
 
@@ -31,7 +32,7 @@ export default async function AnimalsPage({ searchParams }: { searchParams: Prom
     const sex = c.sex === "f" ? t("animals.female") : c.sex === "m" ? t("animals.male") : null;
     return {
       id: c.id, name: c.name, status: c.status, tab: tabOf(c), group: careSet.has(c.status) ? "care" : "other",
-      search: fold([c.name, ...c.aliases, c.microchip ?? ""].join(" ")),
+      search: fold([c.name, ...c.aliases, c.microchip === HIDDEN ? "" : (c.microchip ?? "")].join(" ")),
       statusLabel: statusLabel(t, c.status, c.locationName), tone: TONE[c.status] ?? TONE.unknown, tint: "bg-stone-100 text-stone-300",
       photoId: c.photoId, meta: [age, sex, c.color].filter(Boolean).join(" · "),
       place: c.personName ? t("animals.fostered", { name: c.personName }) : null,

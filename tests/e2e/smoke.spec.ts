@@ -442,6 +442,7 @@ test("data protection: erase a person, delete a cat and an account, and limits o
   await page.click('button:has-text("Modifică detaliile")');
   const adminForm = page.locator('form:has(input[name="color"])');
   await adminForm.locator('input[name="color"]').fill("tabby, 0740000150");
+  await adminForm.locator('input[name="microchip"]').fill("642090000000150");
   await adminForm.locator('button:has-text("Salvează")').click();
   await expect(page.locator('.toast-in[role="status"]')).toBeVisible();
   await vol.goto(cat.href);
@@ -449,12 +450,23 @@ test("data protection: erase a person, delete a cat and an account, and limits o
   const volForm = vol.locator('form:has(input[name="color"])');
   await expect(volForm.locator('input[name="color"]')).toBeDisabled();
   await expect(volForm.locator('input[name="color"]')).not.toHaveValue(/0740000150/);
+  // The microchip is hidden from volunteers everywhere: the page, the form, search and the export.
+  await expect(volForm.locator('input[name="microchip"]')).toBeDisabled();
+  await expect(volForm.locator('input[name="microchip"]')).toHaveValue("[ascuns]");
+  await expect(vol.locator("main")).not.toContainText("642090000000150");
+  expect(await (await vol.request.get("/api/search?q=642090000000150")).json()).toEqual([]);
+  const volExport = await (await vol.request.get("/export/animals")).text();
+  expect(volExport).toContain(`QA Pisica ${run}`);
+  expect(volExport).not.toContain("642090000000150");
+  expect(volExport).not.toContain("0740000150");
   await volForm.locator('textarea[name="otherInfo"]').fill(`QA nota voluntar ${run}`);
   await volForm.locator('button:has-text("Salvează")').click();
   await expect(vol.locator('.toast-in[role="status"]')).toBeVisible();
   await page.goto(cat.href);
   await page.click('button:has-text("Modifică detaliile")');
   await expect(adminForm.locator('input[name="color"]')).toHaveValue("tabby, 0740000150");
+  await expect(adminForm.locator('input[name="microchip"]')).toHaveValue("642090000000150");
+  expect((await (await page.request.get("/api/search?q=642090000000150")).json()).map((r: { title: string }) => r.title)).toContain(`QA Pisica ${run}`);
   await expect(adminForm.locator('textarea[name="otherInfo"]')).toHaveValue(`QA nota voluntar ${run}`);
 
   await vol.goto(`${cat.href}?tab=medical`);

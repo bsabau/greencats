@@ -144,6 +144,7 @@ export const en: Record<Key, string> = {
   "animals.book": "Health book",
   "animals.chip": "Microchip",
   "animals.passport": "Passport",
+  "animals.chipLocked": "Only coordinators can see and change the microchip.",
   "animals.lockedHelp": "Contains hidden contact details. Only a coordinator can change it.",
   "animals.treatment": "Current treatment",
   "animals.history": "History at intake",
