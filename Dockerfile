@@ -1,9 +1,9 @@
-FROM node:24-bookworm-slim AS deps
+FROM node:26-bookworm-slim AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-FROM node:24-bookworm-slim AS build
+FROM node:26-bookworm-slim AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -11,7 +11,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
 # Database migrations, the spreadsheet import, and admin creation.
-FROM node:24-bookworm-slim AS tools
+FROM node:26-bookworm-slim AS tools
 WORKDIR /app
 ENV NODE_ENV=production UPLOAD_DIR=/app/uploads
 COPY --from=deps --chown=node:node /app/node_modules ./node_modules
@@ -30,7 +30,7 @@ COPY scripts/backup-entrypoint.sh /usr/local/bin/backup-entrypoint.sh
 # The entrypoint hands the folders over, then runs the backups as the postgres user, not as root.
 ENTRYPOINT ["/usr/local/bin/backup-entrypoint.sh"]
 
-FROM node:24-bookworm-slim AS runner
+FROM node:26-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0 UPLOAD_DIR=/app/uploads
 COPY --from=build --chown=node:node /app/.next/standalone ./
