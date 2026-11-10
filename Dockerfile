@@ -26,7 +26,9 @@ USER node
 FROM postgres:17-alpine AS backup
 RUN apk add --no-cache gnupg rclone
 COPY scripts/backup.sh /usr/local/bin/backup.sh
-ENTRYPOINT ["/usr/local/bin/backup.sh"]
+COPY scripts/backup-entrypoint.sh /usr/local/bin/backup-entrypoint.sh
+# The entrypoint hands the folders over, then runs the backups as the postgres user, not as root.
+ENTRYPOINT ["/usr/local/bin/backup-entrypoint.sh"]
 
 FROM node:24-bookworm-slim AS runner
 WORKDIR /app
