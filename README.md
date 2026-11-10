@@ -138,3 +138,7 @@ npx playwright test   # browser tests; needs a running stack and E2E_ADMIN_EMAIL
 ```
 
 After changing `src/db/schema.ts`, run `npm run db:generate` and commit the new migration.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The license covers the code only. Shelter data never belongs in this repository.
