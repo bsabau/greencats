@@ -29,6 +29,13 @@
       "when": 1794342210571,
       "tag": "0003_heavy_guardian",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794347323253,
+      "tag": "0004_scrub_audit_log",
+      "breakpoints": true
     }
   ]
 }

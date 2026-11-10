@@ -97,13 +97,20 @@ locations, creating them if they are missing.
 Open **Protecția datelor** (admins only) to see whose data is past the retention
 period and erase it. Nothing is erased automatically. The period is
 `DATA_RETENTION_DAYS` in `.env`, 1825 days (5 years) unless changed. It counts from
-a person's last placement or last edit. Change-log entries older than the period
-are deleted automatically.
+a person's last placement, last edit, or the latest adoption case, calendar event
+or visibility case about them. Active fosters and people with an adoption in
+progress are never listed.
+
+The change log (who changed what, failed logins) is kept for `AUDIT_RETENTION_DAYS`,
+365 days unless changed, and older entries are deleted automatically.
 
 On a person's page an admin can erase their data and a coordinator can download
 everything stored about them. Erasing empties the record and keeps the row, so
-each cat still shows it was placed. Text typed about the person in other notes has
-to be removed by hand.
+each cat still shows it was placed. It also clears the notes of their placements,
+what their adoption cases say about them, their name in the calendar events linked
+to them, and visibility cases whose contact is exactly their name. Before erasing,
+the person's page lists other texts that contain their name (a cat's notes, medical
+records, other cases and events). Those have to be cleaned by hand.
 
 Volunteers never see phone numbers, e-mail addresses, postal addresses or foster
 ratings. Phone numbers and e-mail addresses typed into any text field are hidden

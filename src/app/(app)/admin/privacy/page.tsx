@@ -4,7 +4,7 @@ import { ConfirmDelete } from "@/components/client";
 import { Card, Empty, Flash, Page, Table, Td, Th, linkCls } from "@/components/ui";
 import { getI18n, type Key } from "@/i18n";
 import { requirePermission } from "@/lib/auth";
-import { getPeoplePastRetention, retentionDays } from "@/lib/retention";
+import { auditRetentionDays, getPeoplePastRetention, retentionDays } from "@/lib/retention";
 
 export default async function PrivacyPage({ searchParams }: { searchParams: Promise<{ error?: string; saved?: string }> }) {
   await requirePermission("privacy:manage");
@@ -16,7 +16,7 @@ export default async function PrivacyPage({ searchParams }: { searchParams: Prom
       <Flash params={await searchParams} t={t} />
       <Card title={t("privacy.retention")}>
         <p className="text-sm text-stone-700">{t("privacy.retentionText", { days, years: (days / 365).toFixed(1).replace(/\.0$/, "") })}</p>
-        <p className="mt-2 text-sm text-stone-600">{t("privacy.retentionHelp")}</p>
+        <p className="mt-2 text-sm text-stone-600">{t("privacy.retentionHelp", { auditDays: auditRetentionDays() })}</p>
       </Card>
       <Card title={`${t("privacy.due")} (${due.length})`}>
         {due.length === 0 ? <Empty t={t} /> : (
