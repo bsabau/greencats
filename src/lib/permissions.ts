@@ -7,6 +7,7 @@ export type Permission =
   | "calendar:edit"
   | "calendar:manage_all"
   | "contacts:view_full"
+  | "microchip:view"
   | "contacts:edit"
   | "adoptions:edit"
   | "adoptions:export"
@@ -41,6 +42,7 @@ export function can(actor: Actor, permission: Permission): boolean {
     case "lists:manage":
       return admin || coordinator;
     case "contacts:view_full":
+    case "microchip:view":
     case "adoptions:export":
       return admin || coordinator || actor.ownsAdoptions;
     case "adoptions:edit":
@@ -56,19 +58,48 @@ export function can(actor: Actor, permission: Permission): boolean {
 }
 
 export const REDACTED = "[tel. ascuns]";
-// Romanian and French mobile numbers, the forms found in the team's notes.
-const PHONE = /(?<![\d.])(?:\+?(?:40|33)[ .\-()]*(?:0[ .\-()]*)?[67]|0[ .\-()]*7)(?:[ .\-()]*\d){8}(?![\d.])/g;
+export const HIDDEN = "[ascuns]";
+
+// Digits may be split by spaces, dots, dashes and brackets.
+const SEP = String.raw`[ .\-()]*`;
+const PHONE = new RegExp(
+  // Not inside a longer number, such as a microchip or a decimal. "tel.0740…" and "…0740000113." are numbers.
+  String.raw`(?<!\d)(?<!\d\.)` +
+    // A date such as 07.05.2026 followed by a time isn't a phone number.
+    String.raw`(?!\d{1,2}[.\-]\d{1,2}[.\-]\d{2,4}(?!\d))` +
+    "(?:" +
+    [
+      // Any country code written with + or 00: +40 740 000 101, 0033 6 39 98 01 08, +44 20 7946 0958.
+      String.raw`(?:\+|00)${SEP}[1-9](?:${SEP}\d){7,13}`,
+      // Romanian or French code without the +, as found in the team's notes: 40 740 000 101, 33(0)639980105.
+      String.raw`(?:40|33)${SEP}(?:0${SEP})?[2367](?:${SEP}\d){8}`,
+      // Romanian numbers: mobiles (07…) and landlines (02…, 03…).
+      String.raw`0${SEP}[237](?:${SEP}\d){8}`,
+      // A mobile written without its leading 0: 740 000 101.
+      String.raw`7(?:${SEP}\d){8}`,
+    ].join("|") +
+    ")" +
+    String.raw`(?!\d)(?!\.\d)`,
+  "g",
+);
+
+/** The phone numbers written in a text. */
+export const phonesIn = (text: string): string[] => text.match(PHONE) ?? [];
 
 export const stripPhones = (text: string) => text.replace(PHONE, "").replace(/\(\s*\)/g, "").replace(/\s+/g, " ").replace(/[\s\-–]+$/, "").trim();
 
 const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
 export const REDACTED_EMAIL = "[e-mail ascuns]";
 
-/** Hides phone numbers and e-mail addresses inside free text. Street addresses and landlines can't be detected this way. */
+/** Hides phone numbers and e-mail addresses inside free text. Street addresses can't be detected this way. */
 export function redactPhones<T extends string | null | undefined>(actor: Actor, text: T): T {
   if (!text || can(actor, "contacts:view_full")) return text;
   return text.replace(PHONE, REDACTED).replace(EMAIL, REDACTED_EMAIL) as T;
 }
+
+/** The microchip is personal data: it leads to the owner's registration. Others see only that there is one. */
+export const hideMicrochip = <T extends string | null | undefined>(actor: Actor, chip: T): T | typeof HIDDEN =>
+  chip && !can(actor, "microchip:view") ? HIDDEN : chip;
 
 /** True when the actor would see part of this text hidden. */
 export const hasHidden = (actor: Actor, text: string | null | undefined): boolean => !!text && redactPhones(actor, text) !== text;

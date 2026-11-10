@@ -141,6 +141,7 @@ export const ro = {
   "animals.book": "Carnet de sănătate",
   "animals.chip": "Microcip",
   "animals.passport": "Pașaport",
+  "animals.chipLocked": "Microcipul îl văd și îl modifică doar coordonatorii.",
   "animals.lockedHelp": "Conține date de contact ascunse. Doar un coordonator îl poate modifica.",
   "animals.treatment": "Tratament în curs",
   "animals.history": "Anamneză la preluare",

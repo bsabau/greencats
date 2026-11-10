@@ -66,8 +66,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const today = todayIso();
   const in14 = addDays(today, 14);
   const [due, cards, [{ inCare }], [{ inFoster }], [{ openAdoptions }], [{ toReview }], myShifts, logistics, openShifts] = await Promise.all([
-    getDueItems(),
-    getAnimalCards(),
+    getDueItems(user),
+    getAnimalCards(user),
     db.select({ inCare: count() }).from(s.animals).where(inArray(s.animals.status, [...CARE_STATUSES])),
     db.select({ inFoster: count() }).from(s.animals).where(inArray(s.animals.status, ["foster", "foster_adoption"])),
     db.select({ openAdoptions: count() }).from(s.adoptionCases).where(ne(s.adoptionCases.stage, "done")),

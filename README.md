@@ -112,9 +112,11 @@ to them, and visibility cases whose contact is exactly their name. Before erasin
 the person's page lists other texts that contain their name (a cat's notes, medical
 records, other cases and events). Those have to be cleaned by hand.
 
-Volunteers never see phone numbers, e-mail addresses, postal addresses or foster
-ratings. Phone numbers and e-mail addresses typed into any text field are hidden
-from them. Landline numbers and street addresses in free text are not detected.
+Volunteers never see phone numbers, e-mail addresses, postal addresses, foster
+ratings or microchips. Phone numbers (Romanian mobiles and landlines, and any number
+written with a country code) and e-mail addresses typed into any text field are
+hidden from them, including in the CSV exports. Street addresses in free text are
+not detected.
 
 Uploaded photos are re-encoded, which removes the location a phone stores in them.
 

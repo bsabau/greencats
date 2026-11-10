@@ -40,7 +40,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
       })
       .from(s.calendarEvents)
       .where(or(and(gte(s.calendarEvents.startOn, from), lte(s.calendarEvents.startOn, to)), and(gte(s.calendarEvents.endOn, from), lte(s.calendarEvents.endOn, to)))),
-    getDueItems({ from, to }),
+    getDueItems(user, { from, to }),
   ]);
 
   const items: Item[] = [];

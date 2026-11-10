@@ -174,6 +174,8 @@ export async function updateAnimal(id: string, fd: FormData) {
   for (const key of ANIMAL_EDITABLE_TEXT_FIELDS) {
     if (hasHidden(user, before[key])) fields[key] = before[key];
   }
+  // The same for a microchip the user may not see. Someone who can't see it can still add a missing one.
+  if (before.microchip && !can(user, "microchip:view")) fields.microchip = before.microchip;
   // An exact date typed in the form replaces an approximate one. An untouched approximate date stays approximate.
   const precision = (typed: string | null, old: string | null, oldPrecision: typeof before.birthPrecision) =>
     !typed ? null : typed === old ? oldPrecision : ("day" as const);

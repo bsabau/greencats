@@ -15,12 +15,13 @@ import { sql } from "drizzle-orm";
 import { db, pg, schema as s } from "../src/db";
 import { parseCellDate, parseDayMonth, splitEntries, extractDate, fold, type CellValue, type FuzzyDate } from "../src/lib/dates";
 import { nextDue, type MedicalKind } from "../src/lib/medical-schedule";
-import { stripPhones } from "../src/lib/permissions";
+import { phonesIn, stripPhones } from "../src/lib/permissions";
 import { linkMedicalRecords, recalculateDueDates, seedCatalog } from "../src/lib/catalog";
 import { ensureLocations, type SeedLocation } from "../src/lib/locations";
 import {
   containsPhone,
   nameKey,
+  normalizePhone,
   parseDeathEntry,
   parsePhones,
   splitAnimalList,
@@ -113,7 +114,9 @@ const people: Person[] = [];
 const peopleByName = new Map<string, Person>();
 const peopleByPhone = new Map<string, Person>();
 function upsertPerson(rawName: string, phones: string[] = [], address: string | null = null, note: string | null = null): Person {
-  const name = rawName.split("\n")[0].replace(/\(?https?:\S*\)?/g, "").replace(/\s+/g, " ").replace(/^:\s*/, "").trim();
+  // A phone typed into the name cell would show to everyone who sees the name, so it moves to the phones.
+  phones = [...phones, ...phonesIn(rawName).map(normalizePhone)];
+  const name = stripPhones(rawName.split("\n")[0].replace(/\(?https?:\S*\)?/g, "")).replace(/\s+/g, " ").replace(/^:\s*/, "").trim();
   const key = nameKey(name);
   let p = peopleByName.get(key) ?? phones.map((ph) => peopleByPhone.get(ph)).find(Boolean);
   if (!p) {

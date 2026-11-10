@@ -9,7 +9,7 @@ import { db, schema as s } from "@/db";
 import { getI18n, type Key } from "@/i18n";
 import { requireUser } from "@/lib/auth";
 import { ageInMonths, addDays, todayIso } from "@/lib/dates";
-import { ANIMAL_EDITABLE_TEXT_FIELDS, ANIMAL_TEXT_FIELDS, can, hasHidden, redactFields, redactPhones } from "@/lib/permissions";
+import { ANIMAL_EDITABLE_TEXT_FIELDS, ANIMAL_TEXT_FIELDS, can, hasHidden, hideMicrochip, redactFields, redactPhones } from "@/lib/permissions";
 import { AnimalFields } from "../fields";
 
 const TABS = ["overview", "medical", "placements", "photos"] as const;
@@ -28,8 +28,9 @@ export default async function AnimalPage({ params, searchParams }: { params: Pro
   const tab: TabName = TABS.includes(sp.tab as TabName) ? (sp.tab as TabName) : "overview";
   const [stored] = await db.select().from(s.animals).where(eq(s.animals.id, id));
   if (!stored) notFound();
-  const animal = redactFields(user, stored, ANIMAL_TEXT_FIELDS);
-  const locked = ANIMAL_EDITABLE_TEXT_FIELDS.filter((key) => hasHidden(user, stored[key]));
+  const animal = { ...redactFields(user, stored, ANIMAL_TEXT_FIELDS), microchip: hideMicrochip(user, stored.microchip) };
+  const locked: string[] = ANIMAL_EDITABLE_TEXT_FIELDS.filter((key) => hasHidden(user, stored[key]));
+  if (animal.microchip !== stored.microchip) locked.push("microchip");
 
   const [medical, placements, photos, issues, people, products, clinics, locations] = await Promise.all([
     db.select().from(s.medicalRecords).where(eq(s.medicalRecords.animalId, id)).orderBy(sql`${s.medicalRecords.date} desc nulls last`),

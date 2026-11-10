@@ -3,7 +3,7 @@ import { db, schema as s } from "@/db";
 import { getDueItems } from "@/domain/due";
 import { audit, currentUser } from "@/lib/auth";
 import { toCsv } from "@/lib/csv";
-import { can } from "@/lib/permissions";
+import { ANIMAL_TEXT_FIELDS, can, hideMicrochip, redactFields } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -12,14 +12,20 @@ export async function GET(_req: Request, { params }: { params: Promise<{ kind: s
   if (!user || user.mustChangePassword) return new Response("Unauthorized", { status: 401 });
   const { kind } = await params;
   let csv: string;
+  // Every export is logged, and holds only what the user may see on the pages.
   if (kind === "animals") {
     const rows = await db.select({ a: s.animals, location: s.locations.name }).from(s.animals).leftJoin(s.locations, eq(s.locations.id, s.animals.locationId)).orderBy(asc(s.animals.name));
+    await audit(user.id, "export.animals", "animal", null, { rows: rows.length });
     csv = toCsv(
       ["name", "species", "status", "location", "sex", "color", "birth_date", "intake_date", "sterilized", "health_book", "microchip", "passport"],
-      rows.map(({ a, location }) => [a.name, a.species, a.status, location, a.sex, a.color, a.birthDate, a.intakeDate, a.sterilized, a.healthBookNo, a.microchip, a.passport]),
+      rows.map(({ a: stored, location }) => {
+        const a = redactFields(user, stored, ANIMAL_TEXT_FIELDS);
+        return [a.name, a.species, a.status, location, a.sex, a.color, a.birthDate, a.intakeDate, a.sterilized, a.healthBookNo, hideMicrochip(user, a.microchip), a.passport];
+      }),
     );
   } else if (kind === "due") {
-    const rows = await getDueItems();
+    const rows = await getDueItems(user);
+    await audit(user.id, "export.due", "animal", null, { rows: rows.length });
     csv = toCsv(["due_on", "animal", "type"], rows.map((d) => [d.dueOn, d.animalName, d.kind]));
   } else if (kind === "adoptions") {
     if (!can(user, "adoptions:export")) return new Response("Forbidden", { status: 403 });

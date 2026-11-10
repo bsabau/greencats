@@ -7,7 +7,7 @@ import { Badge, Card, Definition, Empty, Flash, Page, btn, btnGhost, linkCls } f
 import { db, schema as s } from "@/db";
 import { getI18n, type Key } from "@/i18n";
 import { audit, requireUser } from "@/lib/auth";
-import { can, maskContact } from "@/lib/permissions";
+import { can, maskContact, redactPhones } from "@/lib/permissions";
 import { findMentions } from "@/domain/people";
 import { PersonFields } from "../fields";
 
@@ -76,7 +76,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                 <li key={p.id} className="py-2 text-sm">
                   <Link className={linkCls} href={`/animals/${p.animalId}`}>{animal}</Link>
                   {p.open && <> <Badge tone="green">{t("animals.current")}</Badge></>}
-                  <div className="text-stone-600">{t(`placement.${p.kind}` as Key)} · {p.startDate ? fmtDate(p.startDate) : (p.startText ?? none)}</div>
+                  <div className="text-stone-600">{t(`placement.${p.kind}` as Key)} · {p.startDate ? fmtDate(p.startDate) : (redactPhones(user, p.startText) ?? none)}</div>
                 </li>
               ))}
             </ul>

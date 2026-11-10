@@ -9,12 +9,12 @@ export type AnimalFormValues = Partial<{
 }>;
 
 /**
- * `locked` fields hold contact details this user can't see. They show the hidden version, read-only,
- * and aren't sent with the form, so saving keeps the real text.
+ * `locked` fields hold contact details, or a microchip, this user can't see. They show the hidden
+ * version, read-only, and aren't sent with the form, so saving keeps the real text.
  */
 export function AnimalFields({ t, values = {}, locked = [] }: { t: T; values?: AnimalFormValues; locked?: readonly string[] }) {
   const isLocked = (name: keyof AnimalFormValues) => locked.includes(name);
-  const help = (name: keyof AnimalFormValues) => (isLocked(name) ? t("animals.lockedHelp") : undefined);
+  const help = (name: keyof AnimalFormValues) => (!isLocked(name) ? undefined : name === "microchip" ? t("animals.chipLocked") : t("animals.lockedHelp"));
   const input = (label: string, name: keyof AnimalFormValues, type = "text") => (
     <Field label={label} help={help(name)}>
       <input className={inputCls} type={type} name={name} defaultValue={values[name] ?? ""} required={name === "name"} disabled={isLocked(name)} />
