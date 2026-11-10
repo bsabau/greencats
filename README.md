@@ -68,11 +68,11 @@ Due dates come from `src/lib/medical-schedule.ts`. The intervals are working
 assumptions that the shelter's vet should confirm. A due date can also be set by
 hand on any medical record.
 
-## Products and clinics
+## Lists: products, clinics and locations
 
 The **Liste** page (admins and coordinators) holds the products and clinics offered
-when adding a medical record. A product can have its own interval until the next
-dose; left empty, the general rule in `src/lib/medical-schedule.ts` applies. Kittens
+when adding a medical record, and the shelter locations. A product can have its own
+interval until the next dose; left empty, the general rule in `src/lib/medical-schedule.ts` applies. Kittens
 always get the short kitten intervals. Merge two entries when one is a duplicate.
 
 The import links notes such as "Nextgard combo - Energy" to the matching product and
@@ -85,6 +85,12 @@ docker compose run --rm tools npm run normalize-medical -- --apply
 
 Once the vet has confirmed product intervals, `-- --apply --recalculate` updates each
 cat's next due dates from them. Notes it can't recognise appear on **De verificat**.
+
+A cat living in the shelter has the status **În adăpost** and a location, such as
+Căsuță or Ana & Adi. Add a new place on the Liste page; no code change is needed. An
+inactive location is no longer offered when moving a cat, and the cats already there
+keep it. The import puts cats from the workbook's Căsuță and Ana & Adi columns at those
+locations, creating them if they are missing.
 
 ## Data protection
 

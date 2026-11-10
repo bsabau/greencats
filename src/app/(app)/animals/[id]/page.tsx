@@ -34,7 +34,7 @@ export default async function AnimalPage({ params, searchParams }: { params: Pro
     "contractText", "birthText", "intakeText", "sterilizedText", "color", "healthBookNo", "passport",
   ]);
 
-  const [medical, placements, photos, issues, people, products, clinics] = await Promise.all([
+  const [medical, placements, photos, issues, people, products, clinics, locations] = await Promise.all([
     db.select().from(s.medicalRecords).where(eq(s.medicalRecords.animalId, id)).orderBy(sql`${s.medicalRecords.date} desc nulls last`),
     db.select({ p: s.placements, personName: s.people.name }).from(s.placements).innerJoin(s.people, eq(s.people.id, s.placements.personId)).where(eq(s.placements.animalId, id)).orderBy(desc(s.placements.open), sql`${s.placements.startDate} desc nulls last`),
     db.select().from(s.photos).where(eq(s.photos.animalId, id)),
@@ -42,7 +42,9 @@ export default async function AnimalPage({ params, searchParams }: { params: Pro
     db.select({ id: s.people.id, name: s.people.name }).from(s.people).where(isNull(s.people.erasedAt)).orderBy(asc(s.people.name)),
     db.select({ id: s.products.id, name: s.products.name, kinds: s.products.kinds, active: s.products.active }).from(s.products).orderBy(asc(s.products.name)),
     db.select({ id: s.clinics.id, name: s.clinics.name, active: s.clinics.active }).from(s.clinics).orderBy(asc(s.clinics.name)),
+    db.select({ id: s.locations.id, name: s.locations.name, active: s.locations.active }).from(s.locations).orderBy(asc(s.locations.name)),
   ]);
+  const locationName = locations.find((l) => l.id === animal.locationId)?.name ?? null;
   const productName = new Map(products.map((p) => [p.id, p.name]));
   const clinicName = new Map(clinics.map((c) => [c.id, c.name]));
 
@@ -74,7 +76,7 @@ export default async function AnimalPage({ params, searchParams }: { params: Pro
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-semibold text-stone-900">{animal.name}</h1>
-            <StatusBadge status={animal.status} t={t} />
+            <StatusBadge status={animal.status} location={locationName} t={t} />
           </div>
           <p className="mt-0.5 text-sm text-stone-600">
             {[age, animal.sex === "f" ? t("animals.female") : animal.sex === "m" ? t("animals.male") : null, animal.color].filter(Boolean).join(" · ") || none}
@@ -110,6 +112,7 @@ export default async function AnimalPage({ params, searchParams }: { params: Pro
                 <MoveFields
                   statuses={s.animalStatusEnum.enumValues.map((v) => ({ value: v, label: t(`status.${v}` as Key) }))}
                   needsPerson={NEEDS_PERSON} initial={animal.status} statusLabel={t("common.status")} personLabel={t("animals.person")} select={inputCls}
+                  locations={locations.filter((l) => l.active || l.id === animal.locationId)} initialLocation={animal.locationId} locationLabel={t("animals.shelterLocation")}
                 >
                   <Combobox name="personId" options={people} placeholder={t("common.search")} emptyLabel={t("search.none")} inputClass={inputCls} />
                 </MoveFields>

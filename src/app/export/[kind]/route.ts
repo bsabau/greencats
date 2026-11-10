@@ -1,4 +1,4 @@
-import { asc } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { db, schema as s } from "@/db";
 import { getDueItems } from "@/domain/due";
 import { audit, currentUser } from "@/lib/auth";
@@ -13,10 +13,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ kind: s
   const { kind } = await params;
   let csv: string;
   if (kind === "animals") {
-    const rows = await db.select().from(s.animals).orderBy(asc(s.animals.name));
+    const rows = await db.select({ a: s.animals, location: s.locations.name }).from(s.animals).leftJoin(s.locations, eq(s.locations.id, s.animals.locationId)).orderBy(asc(s.animals.name));
     csv = toCsv(
-      ["name", "species", "status", "sex", "color", "birth_date", "intake_date", "sterilized", "health_book", "microchip", "passport"],
-      rows.map((a) => [a.name, a.species, a.status, a.sex, a.color, a.birthDate, a.intakeDate, a.sterilized, a.healthBookNo, a.microchip, a.passport]),
+      ["name", "species", "status", "location", "sex", "color", "birth_date", "intake_date", "sterilized", "health_book", "microchip", "passport"],
+      rows.map(({ a, location }) => [a.name, a.species, a.status, location, a.sex, a.color, a.birthDate, a.intakeDate, a.sterilized, a.healthBookNo, a.microchip, a.passport]),
     );
   } else if (kind === "due") {
     const rows = await getDueItems();

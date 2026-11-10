@@ -12,7 +12,10 @@ export async function getReportData() {
   const care = [...CARE_STATUSES];
 
   const [byStatus, [site], intakes, adoptions, [paperwork]] = await Promise.all([
-    pg<{ status: string; n: number }[]>`select status::text, count(*)::int n from animals group by 1 order by 2 desc`,
+    // Animals in the shelter are counted per location.
+    pg<{ status: string; location: string | null; n: number }[]>`
+      select a.status::text, l.name location, count(*)::int n from animals a
+      left join locations l on l.id = a.location_id group by 1, 2 order by 3 desc`,
     // Definitions come from the workbook's "Date homepage site" rules.
     pg<{ sterilized: number; adopted: number; taken_in: number }[]>`
       select count(*) filter (where sterilized = 'yes' and species = 'cat')::int sterilized,

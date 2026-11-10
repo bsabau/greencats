@@ -64,3 +64,7 @@ export const SEED_CLINICS: { name: string; aliases: string[] }[] = [
   { name: "Animalia", aliases: [] },
   { name: "Feline Focus", aliases: [] },
 ];
+
+/** The shelter places the workbook has columns for. Migration 0003 creates them with these exact names. */
+export const SEED_LOCATIONS = { casuta: "Căsuță", ana_adi: "Ana & Adi" } as const;
+export type SeedLocation = keyof typeof SEED_LOCATIONS;

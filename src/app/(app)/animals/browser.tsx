@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { fold } from "@/lib/text";
 
 export type BrowserCard = {
-  id: string; name: string; search: string; status: string; group: string; statusLabel: string; tone: string;
+  id: string; name: string; search: string; status: string; tab: string; group: string; statusLabel: string; tone: string;
   photoId: string | null; tint: string; meta: string; place: string | null; overdue: string | null; fiv: string | null;
 };
 export type Tab = { value: string; label: string; count: number };
@@ -16,7 +16,7 @@ export function AnimalBrowser({ cards, tabs, initial, placeholder, emptyLabel, r
   const visible = useMemo(() => {
     const q = fold(query);
     return cards.filter((c) => {
-      const inGroup = group === "all" || (group === "care" ? c.group === "care" : group === "foster" ? c.status.startsWith("foster") : c.status === group);
+      const inGroup = group === "all" || (group === "care" ? c.group === "care" : group === "foster" ? c.status.startsWith("foster") : c.tab === group);
       // A search looks across every status, so a cat can't hide behind the wrong filter.
       return q ? c.search.includes(q) : inGroup;
     });

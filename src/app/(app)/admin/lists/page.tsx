@@ -1,5 +1,5 @@
 import { asc, count, sql } from "drizzle-orm";
-import { mergeClinic, mergeProduct, saveClinic, saveProduct } from "@/app/actions";
+import { mergeClinic, mergeLocation, mergeProduct, saveClinic, saveLocation, saveProduct } from "@/app/actions";
 import { SubmitButton } from "@/components/client";
 import { Badge, Card, Field, Flash, Page, btn, btnGhost, inputCls } from "@/components/ui";
 import { db, schema as s } from "@/db";
@@ -11,6 +11,7 @@ import { normalizeTerm } from "@/lib/product-match";
 
 type Product = typeof s.products.$inferSelect;
 type Clinic = typeof s.clinics.$inferSelect;
+type Location = typeof s.locations.$inferSelect;
 
 function ProductForm({ t, product, aliases, action }: { t: T; product?: Product; aliases?: string[]; action: (fd: FormData) => Promise<void> }) {
   return (
@@ -51,6 +52,16 @@ function ClinicForm({ t, clinic, aliases, action }: { t: T; clinic?: Clinic; ali
   );
 }
 
+function LocationForm({ t, location, action }: { t: T; location?: Location; action: (fd: FormData) => Promise<void> }) {
+  return (
+    <form action={action} className="mt-3 grid gap-3 sm:grid-cols-2">
+      <Field label={t("common.name")}><input className={inputCls} name="name" defaultValue={location?.name ?? ""} required maxLength={80} /></Field>
+      {location && <label className="flex items-center gap-2 text-sm text-stone-700 sm:self-end sm:pb-2.5"><input type="checkbox" name="active" defaultChecked={location.active} />{t("lists.active")}</label>}
+      <div className="sm:col-span-2"><SubmitButton>{t("common.save")}</SubmitButton></div>
+    </form>
+  );
+}
+
 function MergeForm({ t, action, others, help }: { t: T; action: (fd: FormData) => Promise<void>; others: { id: string; name: string }[]; help: string }) {
   if (others.length === 0) return null;
   return (
@@ -74,7 +85,7 @@ function MergeForm({ t, action, others, help }: { t: T; action: (fd: FormData) =
 export default async function ListsPage({ searchParams }: { searchParams: Promise<{ error?: string; saved?: string }> }) {
   await requirePermission("lists:manage");
   const { t } = await getI18n();
-  const [products, clinics, productAliases, clinicAliases, productUse, clinicUse, [{ unlinked }]] = await Promise.all([
+  const [products, clinics, productAliases, clinicAliases, productUse, clinicUse, [{ unlinked }], locations, locationUse] = await Promise.all([
     db.select().from(s.products).orderBy(asc(s.products.name)),
     db.select().from(s.clinics).orderBy(asc(s.clinics.name)),
     db.select().from(s.productAliases),
@@ -82,7 +93,14 @@ export default async function ListsPage({ searchParams }: { searchParams: Promis
     db.select({ id: s.medicalRecords.productId, n: count() }).from(s.medicalRecords).where(sql`${s.medicalRecords.productId} is not null`).groupBy(s.medicalRecords.productId),
     db.select({ id: s.medicalRecords.clinicId, n: count() }).from(s.medicalRecords).where(sql`${s.medicalRecords.clinicId} is not null`).groupBy(s.medicalRecords.clinicId),
     db.select({ unlinked: count() }).from(s.medicalRecords).where(unlinkedFilter),
+    db.select().from(s.locations).orderBy(asc(s.locations.name)),
+    db.select({ id: s.animals.locationId, n: count() }).from(s.animals).where(sql`${s.animals.locationId} is not null`).groupBy(s.animals.locationId),
   ]);
+  const animalsAt = new Map(locationUse.map((u) => [u.id, u.n]));
+  const animalsLabel = (id: string) => {
+    const n = animalsAt.get(id) ?? 0;
+    return n === 1 ? t("lists.animalsOne") : t(n >= 20 && (n % 100 === 0 || n % 100 >= 20) ? "lists.animalsDe" : "lists.animals", { n });
+  };
   const used = new Map([...productUse, ...clinicUse].map((u) => [u.id, u.n]));
   const usedLabel = (id: string) => {
     const n = used.get(id) ?? 0;
@@ -166,6 +184,29 @@ export default async function ListsPage({ searchParams }: { searchParams: Promis
               </li>
             );
           })}
+        </ul>
+      </Card>
+
+      <Card title={`${t("lists.locations")} (${locations.length})`}>
+        <p className="-mt-1 mb-3 text-sm text-stone-600">{t("lists.locationsHelp")}</p>
+        <details>
+          <summary className={`${btn} list-none`}>{t("lists.newLocation")}</summary>
+          <LocationForm t={t} action={saveLocation.bind(null, null)} />
+        </details>
+        <ul className="mt-4 divide-y divide-stone-100">
+          {locations.map((l) => (
+            <li key={l.id} className="py-2.5 text-sm">
+              <details>
+                <summary className="flex cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="font-medium text-stone-900">{l.name}</span>
+                  {!l.active && <Badge>{t("lists.inactive")}</Badge>}
+                  <span className="text-xs text-stone-500">{animalsLabel(l.id)}</span>
+                </summary>
+                <LocationForm t={t} location={l} action={saveLocation.bind(null, l.id)} />
+                <MergeForm t={t} action={mergeLocation.bind(null, l.id)} others={locations.filter((o) => o.id !== l.id)} help={t("lists.mergeLocationHelp")} />
+              </details>
+            </li>
+          ))}
         </ul>
       </Card>
     </Page>

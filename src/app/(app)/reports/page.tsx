@@ -97,7 +97,7 @@ export default async function ReportsPage() {
         </Card>
         <Card title={t("rep.population")}>
           <Table>
-            <tbody>{byStatus.map((r) => <tr key={r.status}><Td><StatusBadge status={r.status} t={t} /></Td><Td right>{r.n}</Td></tr>)}</tbody>
+            <tbody>{byStatus.map((r) => <tr key={`${r.status}:${r.location}`}><Td><StatusBadge status={r.status} location={r.location} t={t} /></Td><Td right>{r.n}</Td></tr>)}</tbody>
           </Table>
         </Card>
         <Card title={t("rep.exports")}>

@@ -50,11 +50,12 @@ export const ro = {
   "err.email_taken": "Există deja un cont cu acest e-mail.",
   "err.photo": "Încărcați o imagine JPEG, PNG sau WebP de cel mult 10 MB.",
   "err.person_required": "Alegeți persoana pentru acest statut.",
+  "err.location_required": "Alegeți locul din adăpost.",
   "err.last_admin": "Trebuie să rămână cel puțin un administrator activ.",
   "err.shift_full": "Tura este completă.",
 
-  "status.casuta": "La căsuță",
-  "status.ana_adi": "La Ana și Adi",
+  "status.in_shelter": "În adăpost",
+  "status.inShelterAt": "La {place}",
   "status.clinic": "La cabinet",
   "status.foster": "Foster",
   "status.foster_adoption": "Foster cu posibilă adopție",
@@ -151,6 +152,7 @@ export const ro = {
   "animals.move": "Schimbă statutul",
   "animals.moveDate": "Data schimbării",
   "animals.person": "Persoana (foster / adoptator)",
+  "animals.shelterLocation": "Locul din adăpost",
   "animals.medical": "Istoric medical",
   "animals.addMedical": "Adaugă înregistrare medicală",
   "animals.type": "Tip",
@@ -397,6 +399,13 @@ export const ro = {
   "err.name_taken": "Există deja un element cu acest nume.",
   "err.alias_taken": "Una dintre denumiri aparține deja altui element.",
   "lists.usedOne": "o înregistrare",
+  "lists.locations": "Locații în adăpost",
+  "lists.locationsHelp": "Locurile din adăpost în care stau pisicile, alese când statutul e „În adăpost”. O locație inactivă nu mai apare la mutarea unei pisici; cele aflate deja acolo rămân.",
+  "lists.newLocation": "Locație nouă",
+  "lists.animals": "{n} animale acum",
+  "lists.animalsDe": "{n} de animale acum",
+  "lists.animalsOne": "un animal acum",
+  "lists.mergeLocationHelp": "Mută toate animalele în locația aleasă, apoi o șterge pe aceasta. Nu se poate anula.",
 } as const;
 
 export type Key = keyof typeof ro;

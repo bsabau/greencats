@@ -2,7 +2,7 @@ import "server-only";
 import { pg } from "@/db";
 import { sterilizationDue } from "@/lib/medical-schedule";
 
-export const CARE_STATUSES = ["casuta", "ana_adi", "clinic", "foster", "foster_adoption"] as const;
+export const CARE_STATUSES = ["in_shelter", "clinic", "foster", "foster_adoption"] as const;
 
 export type DueItem = {
   key: string;

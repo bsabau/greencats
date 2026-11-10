@@ -147,8 +147,14 @@ export function Combobox({ name, options, placeholder, emptyLabel, inputClass, a
   );
 }
 
-/** Shows the person field only for statuses that need one. */
-export function MoveFields({ statuses, needsPerson, initial, statusLabel, personLabel, children, select }: { statuses: { value: string; label: string }[]; needsPerson: string[]; initial: string; statusLabel: string; personLabel: string; children: ReactNode; select: string }) {
+/**
+ * Status, plus what it needs: the shelter location for "in_shelter", the person for
+ * fostering and adoption. Each extra field shows only for the statuses it belongs to.
+ */
+export function MoveFields({ statuses, needsPerson, initial, statusLabel, personLabel, children, select, locations = [], initialLocation, locationLabel }: {
+  statuses: { value: string; label: string }[]; needsPerson: string[]; initial: string; statusLabel: string; personLabel: string; children?: ReactNode; select: string;
+  locations?: Option[]; initialLocation?: string | null; locationLabel?: string;
+}) {
   const [status, setStatus] = useState(initial);
   return (
     <>
@@ -158,7 +164,16 @@ export function MoveFields({ statuses, needsPerson, initial, statusLabel, person
           {statuses.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
         </select>
       </label>
-      {needsPerson.includes(status) && (
+      {status === "in_shelter" && locations.length > 0 && (
+        <label className="block text-sm">
+          <span className="mb-1 block font-medium text-stone-700">{locationLabel}</span>
+          <select className={select} name="locationId" defaultValue={initialLocation ?? (locations.length === 1 ? locations[0].id : "")} required>
+            <option value="" disabled>{"—"}</option>
+            {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+          </select>
+        </label>
+      )}
+      {children && needsPerson.includes(status) && (
         <div className="block text-sm">
           <span className="mb-1 block font-medium text-stone-700">{personLabel}</span>
           {children}
