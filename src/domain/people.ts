@@ -11,7 +11,6 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 /** The name as a whole word, so "Ana" doesn't match inside "Banana". Postgres writes word edges as \m and \M. */
 const wordPattern = (name: string) => `${/^[\p{L}\p{N}]/u.test(name) ? "\\m" : ""}${escapeRegex(name)}${/[\p{L}\p{N}]$/u.test(name) ? "\\M" : ""}`;
-const escapeLike = (text: string) => text.replace(/[\\%_]/g, "\\$&");
 
 /**
  * Erases one person's data. The row stays, empty, so each cat still shows that it was placed,
@@ -52,17 +51,18 @@ export async function erasePersonData(tx: Tx, id: string) {
       .update(s.auditLog)
       .set({ detail: sql`jsonb_set(${s.auditLog.detail}, '{title}', to_jsonb(regexp_replace(${s.auditLog.detail}->>'title', ${pattern}, ${ERASED_NAME}, 'gi')))` })
       .where(and(eq(s.auditLog.entity, "event"), sql`${s.auditLog.detail}->>'title' ~* ${pattern}`));
-    await tx
-      .update(s.visibilityCases)
-      .set({ contactName: null })
-      .where(sql`lower(trim(${s.visibilityCases.contactName})) = lower(${name})`);
-    await tx
-      .update(s.visibilityCases)
-      .set({ interestedPerson: null })
-      .where(sql`lower(trim(${s.visibilityCases.interestedPerson})) = lower(${name})`);
   } else if (events.length) {
     await tx.update(s.calendarEvents).set({ notes: null }).where(inArray(s.calendarEvents.id, events.map((e) => e.id)));
   }
+  // An exact match is safe whatever the length of the name.
+  await tx
+    .update(s.visibilityCases)
+    .set({ contactName: null })
+    .where(sql`lower(trim(${s.visibilityCases.contactName})) = lower(${name})`);
+  await tx
+    .update(s.visibilityCases)
+    .set({ interestedPerson: null })
+    .where(sql`lower(trim(${s.visibilityCases.interestedPerson})) = lower(${name})`);
 }
 
 export type Mention = { kind: "animal" | "medical" | "event" | "adoption" | "visibility"; label: string; href: string };
@@ -76,26 +76,26 @@ export async function findMentions(id: string): Promise<Mention[]> {
   const [person] = await db.select({ name: s.people.name }).from(s.people).where(and(eq(s.people.id, id), isNull(s.people.erasedAt)));
   const name = person?.name.trim() ?? "";
   if (name.length < MIN_NAME_TO_MATCH) return [];
-  const like = `%${escapeLike(name)}%`;
+  const word = wordPattern(name);
   const rows = await pg<{ kind: Mention["kind"]; label: string; target: string }[]>`
     select 'animal' kind, name label, id::text target from animals
     where concat_ws(' ', location_note, current_treatment, intake_history, medical_summary, other_info, refill_notes, death_note,
-      contract_text, birth_text, intake_text, sterilized_text, color, health_book_no, passport) ilike ${like}
+      contract_text, birth_text, intake_text, sterilized_text, color, health_book_no, passport) ~* ${word}
     union all
     select distinct 'medical', a.name, a.id::text from medical_records m join animals a on a.id = m.animal_id
-    where concat_ws(' ', m.description, m.raw_text) ilike ${like}
+    where concat_ws(' ', m.description, m.raw_text) ~* ${word}
     union all
     select 'event', title, id::text from calendar_events
-    where person_id is distinct from ${id} and concat_ws(' ', title, notes) ilike ${like}
+    where person_id is distinct from ${id} and concat_ws(' ', title, notes) ~* ${word}
     union all
     select 'adoption', animal_name, id::text from adoption_cases
-    where person_id is distinct from ${id} and concat_ws(' ', adopter_name, notes, status_note) ilike ${like}
+    where person_id is distinct from ${id} and concat_ws(' ', adopter_name, notes, status_note) ~* ${word}
     union all
     select 'visibility', animal_name, id::text from visibility_cases
     -- A contact that is exactly this name is cleared on erasure, so only the rest of the case is searched.
     where concat_ws(' ', details, extra, description, info_sheet,
       case when lower(trim(contact_name)) = lower(${name}) then null else contact_name end,
-      case when lower(trim(interested_person)) = lower(${name}) then null else interested_person end) ilike ${like}
+      case when lower(trim(interested_person)) = lower(${name}) then null else interested_person end) ~* ${word}
     limit 100`;
   const href = (kind: Mention["kind"], target: string) =>
     kind === "animal" ? `/animals/${target}` : kind === "medical" ? `/animals/${target}?tab=medical` : kind === "event" ? `/calendar/${target}` : `/${kind === "adoption" ? "adoptions" : "visibility"}`;

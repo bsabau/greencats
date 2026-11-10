@@ -6,11 +6,11 @@ WHERE "action" = 'login.failed' AND "detail" ? 'email' AND position('@' in coale
 -- Cat edits kept the old and new value of fields that can hold contact details, and of the microchip.
 -- They now record only that the field changed.
 UPDATE "audit_log" SET "detail" = (
-  SELECT jsonb_object_agg(key, CASE WHEN key IN (
-    'color', 'healthBookNo', 'passport', 'microchip', 'locationNote', 'currentTreatment', 'intakeHistory',
-    'medicalSummary', 'otherInfo', 'refillNotes', 'deathNote', 'contractText', 'birthText', 'intakeText', 'sterilizedText'
-  ) THEN '"changed"'::jsonb ELSE value END)
+  SELECT jsonb_object_agg(key, CASE WHEN key = ANY (k.private) THEN '"changed"'::jsonb ELSE value END)
   FROM jsonb_each("detail")
 )
-WHERE "action" = 'animal.update' AND jsonb_typeof("detail") = 'object'
-  AND "detail" ?| array['color', 'healthBookNo', 'passport', 'microchip'];
+FROM (SELECT array[
+  'color', 'healthBookNo', 'passport', 'microchip', 'locationNote', 'currentTreatment', 'intakeHistory',
+  'medicalSummary', 'otherInfo', 'refillNotes', 'deathNote', 'contractText', 'birthText', 'intakeText', 'sterilizedText'
+] private) k
+WHERE "action" = 'animal.update' AND jsonb_typeof("detail") = 'object' AND "detail" ?| k.private;
