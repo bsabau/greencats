@@ -2,6 +2,7 @@ import "server-only";
 import { cookies } from "next/headers";
 import { en } from "./en";
 import { ro, type Key } from "./ro";
+import { spanParts } from "@/lib/dates";
 
 export type { Key };
 export type Locale = "ro" | "en";
@@ -39,5 +40,15 @@ export async function getI18n() {
     return approx + t(years === 1 ? "age.year" : locale === "ro" && years >= 20 ? "age.yearsDe" : "age.years", { n: years });
   };
 
-  return { t, locale, fmtDate, fmtDateTime, fmtMonth, fmtMonthShort, fmtAge };
+  /** "12 zile", "4 luni", "1 an și 4 luni": the time between two dates, for overdue and due-soon texts. */
+  const fmtSpan = (fromIso: string, toIso: string) => {
+    const { years, months, days } = spanParts(fromIso, toIso);
+    if (years === 0 && months === 0) return t(days === 1 ? "span.day" : locale === "ro" && days >= 20 ? "span.daysDe" : "span.days", { n: days });
+    const monthText = months ? t(months === 1 ? "age.month" : "age.months", { n: months }) : "";
+    if (years === 0) return monthText;
+    const yearText = t(years === 1 ? "age.year" : locale === "ro" && years >= 20 ? "age.yearsDe" : "age.years", { n: years });
+    return monthText ? t("span.and", { a: yearText, b: monthText }) : yearText;
+  };
+
+  return { t, locale, fmtDate, fmtDateTime, fmtMonth, fmtMonthShort, fmtAge, fmtSpan };
 }

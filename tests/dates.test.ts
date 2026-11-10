@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   addMonths,
   ageInMonths,
+  spanParts,
   extractDate,
   parseCellDate,
   parseDayMonth,
@@ -95,4 +96,22 @@ describe("ageInMonths", () => {
 
 describe("addMonths", () => {
   it("clamps to the end of a shorter month", () => expect(addMonths("2026-08-31", 6)).toBe("2027-02-28"));
+});
+
+describe("spanParts", () => {
+  it("counts days below one month", () => {
+    expect(spanParts("2026-11-01", "2026-11-13")).toEqual({ years: 0, months: 0, days: 12 });
+    expect(spanParts("2026-10-20", "2026-11-10")).toEqual({ years: 0, months: 0, days: 21 });
+  });
+
+  it("counts whole months and years from one calendar date to the other", () => {
+    expect(spanParts("2025-07-18", "2026-11-10")).toEqual({ years: 1, months: 3, days: 0 });
+    expect(spanParts("2025-07-10", "2026-11-10")).toEqual({ years: 1, months: 4, days: 0 });
+    expect(spanParts("2023-12-27", "2026-11-10")).toEqual({ years: 2, months: 10, days: 0 });
+    expect(spanParts("2025-11-10", "2026-11-10")).toEqual({ years: 1, months: 0, days: 0 });
+  });
+
+  it("never goes below zero", () => {
+    expect(spanParts("2026-11-12", "2026-11-10")).toEqual({ years: 0, months: 0, days: 0 });
+  });
 });

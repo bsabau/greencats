@@ -1,11 +1,12 @@
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
-import { HeartPulse, Pencil, Repeat2 } from "lucide-react";
+import { Check, HeartPulse, Pencil, Repeat2 } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { addMedicalRecord, completeDue, deleteAnimal, deleteMedicalRecord, moveAnimal, undoComplete, updateAnimal, uploadPhoto } from "@/app/actions";
 import { Combobox, ConfirmDelete, DoneButton, MedicalKindFields, ModalButton, MoveFields, SubmitButton } from "@/components/client";
-import { AnimalPhoto, Badge, Card, Definition, Empty, Field, Flash, StatusBadge, btn, btnGhost, inputCls, linkCls, type Tone } from "@/components/ui";
+import { AnimalPhoto, Badge, Card, Definition, Empty, Field, Flash, StatusBadge, btn, btnGhost, inputCls, linkCls } from "@/components/ui";
 import { db, schema as s } from "@/db";
+import { CARE_STATUSES } from "@/domain/due";
 import { getI18n, type Key } from "@/i18n";
 import { requireUser } from "@/lib/auth";
 import { ageInMonths, addDays, todayIso } from "@/lib/dates";
@@ -17,13 +18,19 @@ type TabName = (typeof TABS)[number];
 const TAB_LABEL: Record<TabName, Key> = { overview: "animals.tabOverview", medical: "animals.tabMedical", placements: "animals.tabPlacements", photos: "animals.tabPhotos" };
 const CORE_KINDS = ["vaccine_polyvalent", "vaccine_rabies", "deworm_external", "deworm_internal"] as const;
 const SOON_DAYS = 14;
+const DUE_TONE = {
+  overdue: { border: "border-red-400", text: "text-red-800" },
+  soon: { border: "border-amber-400", text: "text-amber-800" },
+  ok: { border: "border-brand-500", text: "text-brand-800" },
+  none: { border: "border-stone-200", text: "text-stone-600" },
+} as const;
 const NEEDS_PERSON = ["foster", "foster_adoption", "adoption_incomplete", "adopted"];
 
 export default async function AnimalPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ error?: string; saved?: string; done?: string; tab?: string }> }) {
   const user = await requireUser();
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
-  const { t, fmtDate, fmtAge } = await getI18n();
+  const { t, fmtDate, fmtAge, fmtSpan } = await getI18n();
   const sp = await searchParams;
   const tab: TabName = TABS.includes(sp.tab as TabName) ? (sp.tab as TabName) : "overview";
   const [stored] = await db.select().from(s.animals).where(eq(s.animals.id, id));
@@ -55,6 +62,8 @@ export default async function AnimalPage({ params, searchParams }: { params: Pro
   const current = placements.find(({ p }) => p.open);
   const fiv = medical.find((m) => m.kind === "test_fiv_felv" && m.result);
   const latestOf = (kind: string) => medical.find((m) => m.kind === kind);
+  // Due dates matter only while the shelter looks after the cat, foster homes included.
+  const inCare = (CARE_STATUSES as readonly string[]).includes(animal.status);
   const backToMedical = `/animals/${id}?tab=medical`;
   const undo = sp.done ? (
     <form action={undoComplete.bind(null, sp.done, backToMedical)}><button className="cursor-pointer whitespace-nowrap font-semibold underline">{t("common.undo")}</button></form>
@@ -190,22 +199,43 @@ export default async function AnimalPage({ params, searchParams }: { params: Pro
       {tab === "medical" && (
         <div id="medical" className="space-y-4">
           <Card title={t("animals.statusNow")}>
+            {!inCare && <p className="mb-3 text-sm text-stone-600">{t("animals.notInCare")}</p>}
             <ul className="grid gap-2 sm:grid-cols-2">
               {CORE_KINDS.map((kind) => {
+                const label = t(`kind.${kind}` as Key);
                 const last = latestOf(kind);
-                const due = last?.nextDueOn ?? null;
-                const state: [Key, Tone] | null = !due ? null : due < today ? ["animals.dueState.overdue", "red"] : due <= soon ? ["animals.dueState.soon", "amber"] : ["animals.dueState.ok", "green"];
+                const due = inCare ? (last?.nextDueOn ?? null) : null;
+                const doneToday = medical.some((m) => m.kind === kind && m.date === today);
+                // The status in words, so nobody has to work out from two dates how late it is.
+                const [status, tone]: [string | null, keyof typeof DUE_TONE] = !due
+                  ? [null, "none"]
+                  : due < today
+                    ? [t("animals.dueState.overdue", { span: fmtSpan(due, today) }), "overdue"]
+                    : due === today
+                      ? [t("animals.dueState.today"), "soon"]
+                      : due <= soon
+                        ? [t("animals.dueState.soon", { span: fmtSpan(today, due), date: fmtDate(due) }), "soon"]
+                        : [t("animals.dueState.ok", { date: fmtDate(due) }), "ok"];
+                const lastLine = last
+                  ? [t("animals.lastOn", { date: fmtDate(last.date, last.precision) }), last.productId ? productName.get(last.productId) : null].filter(Boolean).join(" · ")
+                  : t("animals.never");
                 return (
-                  <li key={kind} className="flex items-start justify-between gap-2 rounded-xl bg-stone-50 p-3">
+                  <li key={kind} className={`flex items-center justify-between gap-3 rounded-xl border-l-4 bg-stone-50 p-3 ${DUE_TONE[tone].border}`}>
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold text-stone-900">{t(`kind.${kind}` as Key)}</p>
-                      <p className="text-xs text-stone-600">{last ? [t("animals.lastOn", { date: fmtDate(last.date, last.precision) }), last.productId ? productName.get(last.productId) : null].filter(Boolean).join(" · ") : t("animals.never")}</p>
-                      {due && <p className="text-xs text-stone-600">{t("animals.nextDue")}: {fmtDate(due)}</p>}
+                      <p className="text-sm font-semibold text-stone-900">{label}</p>
+                      {status && <p className={`text-sm font-medium ${DUE_TONE[tone].text}`}>{status}</p>}
+                      <p className="text-xs text-stone-600">{lastLine}</p>
                     </div>
-                    <div className="flex shrink-0 flex-col items-end gap-1.5">
-                      {state && <Badge tone={state[1]}>{t(state[0])}</Badge>}
-                      <form action={completeDue.bind(null, id, kind, backToMedical)}><DoneButton label={t("home.done")} ariaLabel={t("home.doneAria", { kind: t(`kind.${kind}` as Key), name: animal.name })} /></form>
-                    </div>
+                    {doneToday ? (
+                      // Once today's dose is noted there is nothing to press, so it can't be noted twice.
+                      <span title={t("animals.doneTodayHelp")} className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap px-2.5 py-1 text-xs font-semibold text-brand-800">
+                        <Check aria-hidden className="h-3.5 w-3.5" />{t("animals.doneToday")}
+                      </span>
+                    ) : inCare && (
+                      <form action={completeDue.bind(null, id, kind, backToMedical)} className="shrink-0">
+                        <DoneButton label={t("home.done")} ariaLabel={t("home.doneAria", { kind: label, name: animal.name })} />
+                      </form>
+                    )}
                   </li>
                 );
               })}

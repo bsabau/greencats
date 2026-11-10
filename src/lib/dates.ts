@@ -149,6 +149,18 @@ export function daysBetween(fromIso: string, toIso: string): number {
 }
 
 /** Whole months between a birth date and today, or null if there's no usable date. */
+/**
+ * The time from one date to a later one in calendar terms: whole years and months,
+ * or only days when it is less than a month. Used for "overdue by 1 year and 4 months".
+ */
+export function spanParts(fromIso: string, toIso: string): { years: number; months: number; days: number } {
+  const [y1, m1, d1] = fromIso.split("-").map(Number);
+  const [y2, m2, d2] = toIso.split("-").map(Number);
+  const total = Math.max(0, (y2 - y1) * 12 + (m2 - m1) - (d2 < d1 ? 1 : 0));
+  if (total === 0) return { years: 0, months: 0, days: Math.max(0, daysBetween(fromIso, toIso)) };
+  return { years: Math.floor(total / 12), months: total % 12, days: 0 };
+}
+
 export function ageInMonths(birthIso: string | null, today: string): number | null {
   if (!birthIso || birthIso > today) return null;
   const [by, bm, bd] = birthIso.split("-").map(Number);
