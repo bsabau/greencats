@@ -38,6 +38,23 @@ function watchFailures(page: Page) {
 
 test.describe.configure({ mode: "serial" });
 
+test("only the page's own scripts may run", async ({ page }) => {
+  const failures = watchFailures(page);
+  const response = await page.goto("/login");
+  const csp = response!.headers()["content-security-policy"];
+  const nonce = csp.match(/'nonce-([^']+)'/)?.[1];
+  expect(nonce).toBeTruthy();
+  expect(csp).not.toMatch(/script-src[^;]*'unsafe-inline'/);
+  // A new nonce for every page view, so an attacker can't reuse one.
+  const again = (await page.request.get("/login")).headers()["content-security-policy"];
+  expect(again).not.toContain(nonce!);
+  // Every script in the page carries it. Browsers hide the attribute value, so the property is read.
+  const nonces = await page.locator("script").evaluateAll((els) => els.map((el) => (el as HTMLScriptElement).nonce));
+  expect(nonces.length).toBeGreaterThan(0);
+  expect(nonces.every((n) => n === nonce)).toBe(true);
+  expect(failures).toEqual([]);
+});
+
 test("anonymous visitors get nothing", async ({ page, request }) => {
   await page.goto("/animals");
   await expect(page).toHaveURL(/\/login/);
@@ -216,6 +233,21 @@ test("admin full journey", async ({ page }) => {
   expect(stored.subarray(0, 2).toString("hex")).toBe("ffd8");
   expect(stored.includes("QA-CAMERA-MARKER")).toBe(false);
   expect(stored.includes("Exif")).toBe(false);
+
+  // A photo near the 10 MB limit arrives whole through the proxy and is stored at most 2048 px wide.
+  const side = 2600;
+  const noise = Buffer.alloc(side * side * 3);
+  for (let i = 0; i < noise.length; i++) noise[i] = (i * 2654435761) >>> 24;
+  const large = await sharp(noise, { raw: { width: side, height: side, channels: 3 } }).jpeg({ quality: 100 }).toBuffer();
+  expect(large.length).toBeGreaterThan(6 * 1024 * 1024);
+  expect(large.length).toBeLessThan(10 * 1024 * 1024);
+  const photosBefore = await page.locator('main a[href^="/photos/"]').count();
+  await page.setInputFiles('input[name="photo"]', { name: "large.jpg", mimeType: "image/jpeg", buffer: large });
+  await page.click('button:has-text("Încarcă")');
+  await expect(page.locator('main a[href^="/photos/"]')).toHaveCount(photosBefore + 1);
+  const hrefs = await page.locator('main a[href^="/photos/"]').evaluateAll((els) => els.map((el) => el.getAttribute("href")!));
+  const widths = await Promise.all(hrefs.map(async (h) => (await sharp(Buffer.from(await (await page.request.get(h)).body())).metadata()).width));
+  expect(widths).toContain(2048);
 
   // Global search finds the new cat from anywhere.
   await page.goto("/calendar");
