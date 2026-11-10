@@ -26,7 +26,8 @@ import { date, int, oneOf, text, time, uuid } from "@/lib/forms";
 import { linkMedicalRecords } from "@/lib/catalog";
 import { PRODUCT_KINDS, nextDue } from "@/lib/medical-schedule";
 import { normalizeTerm, parseAliases } from "@/lib/product-match";
-import { ANIMAL_EDITABLE_TEXT_FIELDS, can, hasHidden } from "@/lib/permissions";
+import { ANIMAL_EDITABLE_TEXT_FIELDS, ANIMAL_TEXT_FIELDS, can, hasHidden } from "@/lib/permissions";
+import { erasePersonData } from "@/domain/people";
 import { getPeoplePastRetention, purgeOldAuditEntries } from "@/lib/retention";
 import { parsePhones } from "@/lib/import-helpers";
 
@@ -52,8 +53,8 @@ export async function login(fd: FormData) {
   const ok = await verifyPassword(user?.passwordHash ?? (await placeholderHash()), password);
   if (!user || !user.active || !ok) {
     recordLoginFailure(email, ip);
-    // The typed address is kept short: people sometimes type a password into the wrong box.
-    await audit(user?.id ?? null, "login.failed", "user", user?.id ?? null, { email: email.slice(0, 60) });
+    // People sometimes type a password into the address box, so only text that looks like an address is kept.
+    await audit(user?.id ?? null, "login.failed", "user", user?.id ?? null, email.includes("@") ? { email: email.slice(0, 60) } : undefined);
     fail("/login", "login");
     return;
   }
@@ -159,6 +160,8 @@ export async function createAnimal(fd: FormData) {
   redirect(`/animals/${row.id}`);
 }
 
+const PRIVATE_IN_LOG = new Set<string>([...ANIMAL_TEXT_FIELDS, "microchip"]);
+
 export async function updateAnimal(id: string, fd: FormData) {
   const user = await requirePermission("animals:edit");
   const fields = animalFields(fd);
@@ -184,11 +187,11 @@ export async function updateAnimal(id: string, fd: FormData) {
       updatedAt: new Date(),
     })
     .where(eq(s.animals.id, id));
-  // Free-text notes can hold contact details, so the log records that they changed, not what they said.
-  const FREE_TEXT = new Set(["currentTreatment", "intakeHistory", "medicalSummary", "otherInfo", "locationNote"]);
+  // Text fields can hold contact details and the microchip is personal data, so the log records
+  // that they changed, not what they said.
   const changed = Object.fromEntries(
     Object.entries(fields).filter(([k, v]) => before[k as keyof typeof before] !== v)
-      .map(([k, v]) => [k, FREE_TEXT.has(k) ? "changed" : { from: before[k as keyof typeof before], to: v }]),
+      .map(([k, v]) => [k, PRIVATE_IN_LOG.has(k) ? "changed" : { from: before[k as keyof typeof before], to: v }]),
   );
   await audit(user.id, "animal.update", "animal", id, changed);
   saved(to);
@@ -413,26 +416,14 @@ export async function updatePerson(id: string, fd: FormData) {
   saved(`/people/${id}`);
 }
 
-const ERASED_NAME = "Persoană ștearsă";
-
-async function eraseOne(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], id: string) {
-  await tx
-    .update(s.people)
-    .set({ name: ERASED_NAME, phones: [], email: null, address: null, notes: null, consentNote: null, fosterRating: "unrated", erasedAt: new Date(), updatedAt: new Date() })
-    .where(eq(s.people.id, id));
-  await tx.update(s.placements).set({ notes: null }).where(eq(s.placements.personId, id));
-  await tx.update(s.adoptionCases).set({ adopterName: null, personId: null }).where(eq(s.adoptionCases.personId, id));
-  await tx.update(s.calendarEvents).set({ personId: null }).where(eq(s.calendarEvents.personId, id));
-}
-
 /**
  * Erases a person's data and keeps an empty row, so each cat still shows that it was placed.
- * Text typed about the person elsewhere (a cat's notes, an adoption case typed by hand) has to be cleaned by hand.
+ * Other text that mentions the person is listed on their page beforehand, to be cleaned by hand.
  */
 export async function erasePerson(id: string, back: string) {
   const user = await requirePermission("privacy:manage");
   if (!isUuid(id)) fail("/people", "invalid");
-  await db.transaction((tx) => eraseOne(tx, id));
+  await db.transaction((tx) => erasePersonData(tx, id));
   await audit(user.id, "person.erase", "person", id);
   saved(safeBack(back, "/people"));
 }
@@ -442,7 +433,7 @@ export async function erasePastRetention() {
   const user = await requirePermission("privacy:manage");
   const due = await getPeoplePastRetention();
   await db.transaction(async (tx) => {
-    for (const person of due) await eraseOne(tx, person.id);
+    for (const person of due) await erasePersonData(tx, person.id);
   });
   await audit(user.id, "person.erase_batch", "person", null, { count: due.length, ids: due.map((p) => p.id) });
   saved("/admin/privacy");

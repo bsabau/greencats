@@ -8,6 +8,7 @@ import { db, schema as s } from "@/db";
 import { getI18n, type Key } from "@/i18n";
 import { audit, requireUser } from "@/lib/auth";
 import { can, maskContact } from "@/lib/permissions";
+import { findMentions } from "@/domain/people";
 import { PersonFields } from "../fields";
 
 export default async function PersonPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ error?: string; saved?: string }> }) {
@@ -29,6 +30,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
   const erased = Boolean(row.erasedAt);
   // Each look at someone's contact details is recorded, so misuse can be traced.
   if (full && !erased) await audit(user.id, "person.view", "person", id);
+  const mentions = !erased && can(user, "privacy:manage") ? await findMentions(id) : [];
 
   return (
     <Page title={erased ? t("people.erased") : person.name} actions={full && !erased ? <Badge>{t(`rating.${person.fosterRating}` as Key)}</Badge> : undefined}>
@@ -80,6 +82,19 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
             </ul>
           )}
         </Card>
+        {mentions.length > 0 && (
+          <Card title={`${t("people.mentions")} (${mentions.length})`}>
+            <p className="mb-3 text-sm text-stone-600">{t("people.mentionsHelp")}</p>
+            <ul className="divide-y divide-stone-100">
+              {mentions.map((m, i) => (
+                <li key={i} className="py-2 text-sm">
+                  <span className="mr-2 text-stone-500">{t(`mention.${m.kind}` as Key)}</span>
+                  <Link className={linkCls} href={m.href}>{m.label}</Link>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        )}
       </div>
     </Page>
   );

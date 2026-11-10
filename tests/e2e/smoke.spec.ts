@@ -386,12 +386,49 @@ test("data protection: erase a person, delete a cat and an account, and limits o
   await caseRow.locator('button:has-text("Salvează")').click();
   await expect(page.locator("main")).toContainText(`QA Alt Adoptator ${run}`);
   expect(JSON.stringify(await (await page.request.get(`/export/person/${personId}`)).json())).not.toContain(`QA Adoptie ${run}`);
+
+  // Erasing also clears what the person's adoption case and a visibility case naming them say.
+  // Other text that mentions them is listed on their page first, to be cleaned by hand.
+  await page.click('summary:has-text("Caz nou")');
+  const ownCase = page.locator("details[open] form").first();
+  await ownCase.locator('input[name="animalName"]').fill(`QA Adoptie2 ${run}`);
+  await ownCase.locator('input[name="adopterName"]').fill(personName);
+  await ownCase.locator('input[name="contractNo"]').fill(`C-${run}`);
+  await ownCase.locator('input[name="notes"]').fill(`nota adoptie ${run}`);
+  await ownCase.locator('button:has-text("Salvează")').click();
+  await expect(page.locator("main")).toContainText(`nota adoptie ${run}`);
+  await page.goto("/visibility");
+  await page.click('summary:has-text("Caz nou")');
+  const visCase = page.locator("details[open] form").first();
+  await visCase.locator('input[name="animalName"]').fill(`QA Vizibilitate ${run}`);
+  await visCase.locator('input[name="contactName"]').fill(personName);
+  await visCase.locator('button:has-text("Salvează")').click();
+  await expect(page.locator("main")).toContainText(`QA Vizibilitate ${run}`);
+  const [namedCat] = await (await page.request.get(`/api/search?q=${encodeURIComponent(`QA Pisica ${run}`)}`)).json();
+  await page.goto(namedCat.href);
+  await page.click('button:has-text("Modifică detaliile")');
+  await page.locator('form:has(input[name="color"]) textarea[name="intakeHistory"]').fill(`adusa de ${personName}`);
+  await page.locator('form:has(input[name="color"]) button:has-text("Salvează")').click();
+  await expect(page.locator('.toast-in[role="status"]')).toBeVisible();
   await page.goto(`/people/${personId}`);
+  await expect(page.locator("main")).toContainText("Numele apare și în alte texte");
+  await expect(page.locator("main")).toContainText(`QA Pisica ${run}`);
+  await expect(page.locator("main")).not.toContainText(`QA Vizibilitate ${run}`);
 
   await confirm("Șterge datele persoanei");
   await expect(page.locator("h1")).toHaveText("Persoană ștearsă");
   await expect(page.locator("main")).not.toContainText("700");
   expect(await (await page.request.get(`/api/search?q=${encodeURIComponent(personName)}`)).json()).toEqual([]);
+  await page.goto("/adoptions");
+  const erasedCase = page.locator("li", { hasText: `QA Adoptie2 ${run}` });
+  await expect(erasedCase).toBeVisible();
+  await expect(erasedCase).not.toContainText(personName);
+  await expect(erasedCase).not.toContainText(`nota adoptie ${run}`);
+  await erasedCase.locator('summary:has-text("Modifică")').click();
+  await expect(erasedCase.locator('input[name="contractNo"]')).toHaveValue("");
+  await page.goto("/visibility");
+  await expect(page.locator("main")).toContainText(`QA Vizibilitate ${run}`);
+  await expect(page.locator("main")).not.toContainText(personName);
 
   // A volunteer can't delete a medical record someone else entered. The admin can.
   const [cat] = await (await page.request.get(`/api/search?q=${encodeURIComponent(`QA Pisica ${run}`)}`)).json();
