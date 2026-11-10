@@ -21,7 +21,12 @@ async function readPassword(): Promise<string> {
   let typed = "";
   for await (const chunk of process.stdin as AsyncIterable<string>) {
     for (const char of chunk) {
-      if (char === "\u0003") process.exit(130);
+      if (char === "\u0003") {
+        // Ctrl-C: give the terminal back as it was before leaving.
+        process.stdin.setRawMode(false);
+        process.stdout.write("\n");
+        process.exit(130);
+      }
       if (char === "\r" || char === "\n") {
         process.stdin.setRawMode(false);
         process.stdin.pause();

@@ -658,7 +658,8 @@ export async function createUser(fd: FormData) {
  */
 async function keepingAnAdmin(id: string, removesAdmin: boolean, change: (tx: Parameters<Parameters<typeof db.transaction>[0]>[0]) => Promise<unknown>) {
   return db.transaction(async (tx) => {
-    const admins = await tx.select({ id: s.users.id }).from(s.users).where(and(eq(s.users.role, "admin"), eq(s.users.active, true))).for("update");
+    // Always locked in the same order, so two of these at once wait for each other instead of deadlocking.
+    const admins = await tx.select({ id: s.users.id }).from(s.users).where(and(eq(s.users.role, "admin"), eq(s.users.active, true))).orderBy(s.users.id).for("update");
     if (removesAdmin && admins.length > 0 && admins.every((a) => a.id === id)) return false;
     await change(tx);
     return true;
