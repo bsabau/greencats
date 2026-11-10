@@ -1,7 +1,12 @@
-export const text = (fd: FormData, key: string): string | null => {
+/** Far longer than any real note (the longest so far is about 3,000 characters). Anything beyond is cut. */
+export const MAX_TEXT = 20_000;
+/** For names, titles and e-mail addresses. */
+export const MAX_NAME = 200;
+
+export const text = (fd: FormData, key: string, max = MAX_TEXT): string | null => {
   const v = fd.get(key);
   if (typeof v !== "string") return null;
-  return v.trim() || null;
+  return v.trim().slice(0, max).trim() || null;
 };
 
 export const date = (fd: FormData, key: string): string | null => {

@@ -49,6 +49,7 @@ export const en: Record<Key, string> = {
   "err.locked": "Too many attempts. Try again in 15 minutes.",
   "err.must_change": "Choose a new password to continue.",
   "err.password_short": "The password must be at least 12 characters.",
+  "err.password_long": "The password can have at most 1000 characters.",
   "err.password_wrong": "The current password is incorrect.",
   "err.email_taken": "An account with this email already exists.",
   "err.photo": "Upload a JPEG, PNG or WebP image up to 10 MB.",

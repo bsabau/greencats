@@ -15,6 +15,7 @@ import { sql } from "drizzle-orm";
 import { db, pg, schema as s } from "../src/db";
 import { parseCellDate, parseDayMonth, splitEntries, extractDate, fold, type CellValue, type FuzzyDate } from "../src/lib/dates";
 import { nextDue, type MedicalKind } from "../src/lib/medical-schedule";
+import { cleanPhoto } from "../src/lib/photos";
 import { phonesIn, stripPhones } from "../src/lib/permissions";
 import { linkMedicalRecords, recalculateDueDates, seedCatalog } from "../src/lib/catalog";
 import { ensureLocations, type SeedLocation } from "../src/lib/locations";
@@ -584,7 +585,13 @@ const photoFiles: { fileName: string; buffer: Buffer }[] = [];
       const media = wb.getImage(Number(image.imageId));
       if (!media?.buffer) continue;
       const anchorRow = (image.range.tl.nativeRow ?? 0) + 1;
-      const fileName = `${randomUUID()}.${media.extension ?? "png"}`;
+      // Re-encoded like an uploaded photo: what a phone embeds goes, and the type is the real one.
+      const clean = await cleanPhoto(Buffer.from(media.buffer as unknown as ArrayBuffer));
+      if (!clean) {
+        issue(ws2.name, anchorRow, "Poza", null, "Poza nu a putut fi citita si nu a fost importata.");
+        continue;
+      }
+      const fileName = `${randomUUID()}.${clean.ext}`;
       // A photo sits next to its card. Anything further away stays unassigned for a person to place.
       const owner =
         image.range.tl.nativeCol === 0
@@ -592,11 +599,11 @@ const photoFiles: { fileName: string; buffer: Buffer }[] = [];
               .filter((c) => c.row >= anchorRow - 2 && c.row <= anchorRow + 6)
               .sort((a, b) => Math.abs(a.row - anchorRow) - Math.abs(b.row - anchorRow))[0]
           : undefined;
-      photoFiles.push({ fileName, buffer: Buffer.from(media.buffer as unknown as ArrayBuffer) });
+      photoFiles.push({ fileName, buffer: clean.buffer });
       photos.push({
         animalId: owner?.animal?.id ?? null,
         fileName,
-        contentType: "image/png",
+        contentType: clean.type,
         importNote: `${ws2.name}, rand ${anchorRow}`,
       });
     }
