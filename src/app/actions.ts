@@ -358,6 +358,88 @@ export async function deleteMedicalRecord(animalId: string, recordId: string) {
   redirect(to);
 }
 
+/**
+ * Corrects a medical record. Volunteers change their own entries, coordinators anyone's,
+ * the same as deleting. The log keeps the values from before, so nothing is lost.
+ */
+export async function updateMedicalRecord(animalId: string, recordId: string, fd: FormData) {
+  const user = await requirePermission("medical:edit");
+  const to = `/animals/${animalId}?tab=medical`;
+  if (!isUuid(animalId) || !isUuid(recordId)) fail("/animals", "invalid");
+  const problem = await db.transaction(async (tx) => {
+    const [animal] = await tx.select().from(s.animals).where(eq(s.animals.id, animalId)).for("update");
+    const [before] = animal
+      ? await tx.select().from(s.medicalRecords).where(and(eq(s.medicalRecords.id, recordId), eq(s.medicalRecords.animalId, animalId)))
+      : [];
+    if (!before) return "invalid";
+    if (before.createdBy !== user.id && !can(user, "medical:delete_any")) return "denied";
+
+    const kind = oneOf(fd, "kind", MEDICAL_KINDS, before.kind);
+    // Imported records can lack a date, or know only the month or the year. They keep that
+    // until someone enters a different date, which is then exact to the day.
+    const submittedDate = date(fd, "date");
+    if (!submittedDate && before.date) return "invalid";
+    const dateChanged = submittedDate !== before.date;
+    const on = submittedDate;
+    const precision = dateChanged ? (on ? "day" : null) : before.precision;
+
+    const productId = (PRODUCT_KINDS as readonly string[]).includes(kind) ? uuid(fd, "productId") : null;
+    const [product] = productId ? await tx.select().from(s.products).where(eq(s.products.id, productId)) : [];
+    if (productId && (!product || !product.kinds.includes(kind))) return "invalid";
+    // A product taken out of use can stay on an old record, but can't be newly chosen.
+    if (product && !product.active && product.id !== before.productId) return "invalid";
+    const clinicId = uuid(fd, "clinicId");
+    const [clinic] = clinicId ? await tx.select().from(s.clinics).where(eq(s.clinics.id, clinicId)) : [];
+    if (clinicId && (!clinic || (!clinic.active && clinic.id !== before.clinicId))) return "invalid";
+    const result = kind.startsWith("test_") ? oneOf(fd, "result", ["", "positive", "negative"] as const, "") || null : null;
+
+    // What the page showed is what the form was filled with: the description, or for an
+    // undated imported record its original text. A volunteer sees contact details hidden in
+    // it; the field is then locked and not sent, and the stored text stays.
+    const shown = before.description ?? (before.date ? null : before.rawText);
+    const typed = fd.has("description") && !hasHidden(user, shown) ? text(fd, "description") : shown;
+    // Untouched text stays as stored, except that a record getting its first date would stop
+    // showing its original text, so that text becomes its description.
+    const untouched = typed === (shown?.trim() || null) && !(!before.date && on);
+    const description = untouched ? before.description : typed;
+
+    // The next date follows a new date, type or product unless someone typed a different one.
+    // Emptying the field asks for it to be worked out again. An old record that never had a
+    // next date, and whose date, type and product stay, keeps having none.
+    const birth = animal.birthPrecision === "year" ? null : animal.birthDate;
+    const typedNext = date(fd, "nextDueOn");
+    const basisChanged = dateChanged || kind !== before.kind || productId !== before.productId;
+    const nextDueOn = typedNext && !(basisChanged && typedNext === before.nextDueOn)
+      ? typedNext
+      : !typedNext && !before.nextDueOn && !basisChanged
+        ? null
+        : on ? nextDue(kind, on, birth, product?.intervalDays) : null;
+
+    const after = { kind, date: on, precision, productId, clinicId, result, description, nextDueOn };
+    const changed = Object.fromEntries(
+      Object.entries(after)
+        .filter(([k, v]) => before[k as keyof typeof before] !== v)
+        // Descriptions can hold contact details, so the log records only that they changed.
+        .map(([k, v]) => [k, k === "description" ? "changed" : { from: before[k as keyof typeof before], to: v }]),
+    );
+    if (Object.keys(changed).length === 0) return null;
+    await tx.update(s.medicalRecords).set(after).where(eq(s.medicalRecords.id, recordId));
+
+    // The cat's sterilized field follows its sterilization records, as when one is undone.
+    if (kind === "sterilization" && before.kind !== "sterilization") {
+      await tx.update(s.animals).set({ sterilized: "yes", sterilizedText: null, updatedAt: new Date() }).where(eq(s.animals.id, animalId));
+    } else if (before.kind === "sterilization" && kind !== "sterilization") {
+      const [{ others }] = await tx.select({ others: count() }).from(s.medicalRecords)
+        .where(and(eq(s.medicalRecords.animalId, animalId), eq(s.medicalRecords.kind, "sterilization")));
+      if (others === 0) await tx.update(s.animals).set({ sterilized: "no", updatedAt: new Date() }).where(eq(s.animals.id, animalId));
+    }
+    await audit(user.id, "medical.update", "animal", animalId, { record: recordId, ...changed });
+    return null;
+  });
+  if (problem) fail(to, problem);
+  redirect(`${to}&saved=1`);
+}
+
 /** Removes a cat and everything attached to it. For records created by mistake. */
 export async function deleteAnimal(id: string) {
   const user = await requirePermission("animals:delete");

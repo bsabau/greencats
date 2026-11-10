@@ -56,7 +56,7 @@ the admin and import as above, adding the same two `-f` options.
 | Edit animals, medical records, calendar | yes | yes | yes |
 | See phones, addresses, contact notes | no | yes | yes |
 | Edit contacts, resolve review items | no | yes | yes |
-| Delete another person's medical record, export a person's data | no | yes | yes |
+| Change or delete another person's medical record, export a person's data | no | yes | yes |
 | Manage users, read the change log, erase a person, delete a cat | no | no | yes |
 
 Two flags can be added to any user. **Adoptions owner** edits adoption cases and
