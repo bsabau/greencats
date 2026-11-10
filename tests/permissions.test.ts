@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { REDACTED, REDACTED_EMAIL, can, maskContact, redactFields, redactPhones, stripPhones, type Actor } from "../src/lib/permissions";
+import { REDACTED, REDACTED_EMAIL, can, hasHidden, maskContact, redactFields, redactPhones, stripPhones, type Actor } from "../src/lib/permissions";
 import { nextDue, sterilizationDue } from "../src/lib/medical-schedule";
 
 const volunteer: Actor = { role: "volunteer", ownsAdoptions: false, ownsVisibility: false };
@@ -79,6 +79,13 @@ describe("phone redaction in notes", () => {
   });
   it("shows notes unchanged to coordinators", () => {
     expect(redactPhones(coordinator, "0740000113")).toBe("0740000113");
+  });
+  it("tells when a volunteer would see part of a text hidden", () => {
+    expect(hasHidden(volunteer, "tabby, sunati la 0740000150")).toBe(true);
+    expect(hasHidden(volunteer, "scrie la ana@example.org")).toBe(true);
+    expect(hasHidden(volunteer, "tabby")).toBe(false);
+    expect(hasHidden(volunteer, null)).toBe(false);
+    expect(hasHidden(coordinator, "0740000150")).toBe(false);
   });
   it("cleans a phone out of a name", () => {
     expect(stripPhones("pisoiul fara ureche - Ion Popescu (0740000112)")).toBe("pisoiul fara ureche - Ion Popescu");

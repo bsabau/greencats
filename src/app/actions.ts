@@ -26,7 +26,7 @@ import { date, int, oneOf, text, time, uuid } from "@/lib/forms";
 import { linkMedicalRecords } from "@/lib/catalog";
 import { PRODUCT_KINDS, nextDue } from "@/lib/medical-schedule";
 import { normalizeTerm, parseAliases } from "@/lib/product-match";
-import { REDACTED, REDACTED_EMAIL, can } from "@/lib/permissions";
+import { ANIMAL_EDITABLE_TEXT_FIELDS, can, hasHidden } from "@/lib/permissions";
 import { getPeoplePastRetention, purgeOldAuditEntries } from "@/lib/retention";
 import { parsePhones } from "@/lib/import-helpers";
 
@@ -166,9 +166,10 @@ export async function updateAnimal(id: string, fd: FormData) {
   if (!fields.name) fail(to, "invalid");
   const [before] = await db.select().from(s.animals).where(eq(s.animals.id, id));
   if (!before) fail("/animals", "invalid");
-  // A volunteer's form shows hidden phone numbers as a marker. Saving must not overwrite the real text with it.
-  for (const key of ["currentTreatment", "intakeHistory", "medicalSummary", "otherInfo", "locationNote"] as const) {
-    if (fields[key]?.includes(REDACTED) || fields[key]?.includes(REDACTED_EMAIL)) fields[key] = before[key];
+  // A field holding contact details the user can't see is read-only in their form and isn't sent.
+  // Whatever arrives for it, the stored text stays, so hidden details are never lost or replaced by the marker.
+  for (const key of ANIMAL_EDITABLE_TEXT_FIELDS) {
+    if (hasHidden(user, before[key])) fields[key] = before[key];
   }
   // An exact date typed in the form replaces an approximate one. An untouched approximate date stays approximate.
   const precision = (typed: string | null, old: string | null, oldPrecision: typeof before.birthPrecision) =>
@@ -535,12 +536,38 @@ function adoptionFields(fd: FormData) {
   };
 }
 
+/** The one living person with exactly this name, ignoring case. None when there are several or none. */
+async function personNamed(name: string | null) {
+  if (!name) return null;
+  const rows = await db.select({ id: s.people.id }).from(s.people)
+    .where(and(isNull(s.people.erasedAt), sql`lower(${s.people.name}) = lower(${name})`)).limit(2);
+  return rows.length === 1 ? rows[0].id : null;
+}
+async function animalNamed(name: string) {
+  const rows = await db.select({ id: s.animals.id }).from(s.animals).where(sql`lower(${s.animals.name}) = lower(${name})`).limit(2);
+  return rows.length === 1 ? rows[0].id : null;
+}
+const sameName = (a: string | null, b: string | null) => (a ?? "").trim().toLowerCase() === (b ?? "").trim().toLowerCase();
+
 export async function saveAdoption(id: string | null, fd: FormData) {
   const user = await requirePermission("adoptions:edit");
   const fields = adoptionFields(fd);
   if (!fields.animalName) fail("/adoptions", "invalid");
-  if (id) await db.update(s.adoptionCases).set({ ...fields, updatedAt: new Date() }).where(eq(s.adoptionCases.id, id));
-  else await db.insert(s.adoptionCases).values(fields);
+  if (id) {
+    if (!isUuid(id)) fail("/adoptions", "invalid");
+    const [before] = await db.select().from(s.adoptionCases).where(eq(s.adoptionCases.id, id));
+    if (!before) fail("/adoptions", "invalid");
+    // A case is linked to a person and a cat. A changed name means a different one, so the old link
+    // must not stay: a data export or erasure of the old person would reach this case.
+    await db.update(s.adoptionCases).set({
+      ...fields,
+      personId: sameName(before.adopterName, fields.adopterName) ? before.personId : await personNamed(fields.adopterName),
+      animalId: sameName(before.animalName, fields.animalName) ? before.animalId : await animalNamed(fields.animalName),
+      updatedAt: new Date(),
+    }).where(eq(s.adoptionCases.id, id));
+  } else {
+    await db.insert(s.adoptionCases).values({ ...fields, personId: await personNamed(fields.adopterName), animalId: await animalNamed(fields.animalName) });
+  }
   await audit(user.id, id ? "adoption.update" : "adoption.create", "adoption", id, { animal: fields.animalName, stage: fields.stage });
   saved("/adoptions");
 }
