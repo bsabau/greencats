@@ -1,0 +1,40 @@
+# Weekly update pull requests for the app's dependencies and Docker images.
+# Security fixes are switched on in the repository settings and arrive whenever needed.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Bucharest
+    open-pull-requests-limit: 5
+    groups:
+      # Minor and patch versions come together in one PR. Each major version gets its own,
+      # since those can need code changes.
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+
+  # The base images in the Dockerfile.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Bucharest
+    ignore:
+      # A new major Postgres version can't read the existing data folder. Upgrading it needs
+      # a dump and restore, so it is done by hand, not by an automatic PR.
+      - dependency-name: postgres
+        update-types: [version-update:semver-major]
+
+  # The images named in the Compose files: Postgres and Caddy.
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Bucharest
+    ignore:
+      - dependency-name: postgres
+        update-types: [version-update:semver-major]
