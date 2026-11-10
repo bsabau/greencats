@@ -1,0 +1,36 @@
+# Type-checks, tests and builds every pull request and every change to main.
+# The end-to-end tests need the Docker stack and an admin account, so they still run locally.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# The workflow only reads the code. It gets no secrets and can't write to the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # Actions are pinned to exact commits; Dependabot proposes newer ones.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
