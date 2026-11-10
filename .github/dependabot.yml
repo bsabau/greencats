@@ -38,3 +38,11 @@ updates:
     ignore:
       - dependency-name: postgres
         update-types: [version-update:semver-major]
+
+  # The actions used by the CI workflow.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Bucharest
