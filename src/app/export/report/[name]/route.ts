@@ -1,8 +1,10 @@
+import { fosterTables, getFosterReport } from "@/domain/report-fosters";
 import { getMedicalReport, medicalTables } from "@/domain/report-medical";
 import { getPeriodReport, periodTables } from "@/domain/report-period";
 import { getI18n, type T } from "@/i18n";
 import { audit, currentUser, type User } from "@/lib/auth";
 import { toCsv } from "@/lib/csv";
+import { todayIso } from "@/lib/dates";
 import { parseReportFilters, type ReportFilters } from "@/lib/report-filters";
 import { toXlsx, type ReportTable } from "@/lib/xlsx";
 
@@ -12,6 +14,7 @@ export const dynamic = "force-dynamic";
 const REPORTS: Record<string, (user: User, filters: ReportFilters, t: T) => Promise<ReportTable[]>> = {
   period: async (_user, f, t) => periodTables(await getPeriodReport(f), t),
   medical: async (_user, f, t) => medicalTables(await getMedicalReport(f), t),
+  fosters: async (user, f, t) => fosterTables(await getFosterReport(user, f, todayIso()), user, t),
 };
 
 const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";

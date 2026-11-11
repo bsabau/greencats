@@ -7,12 +7,13 @@ export const REPORT_TABS = [
   { href: "/reports", label: "rep.tab.overview" },
   { href: "/reports/period", label: "rep.tab.period" },
   { href: "/reports/medical", label: "rep.tab.medical" },
+  { href: "/reports/fosters", label: "rep.tab.fosters" },
 ] as const;
 
 /** Links between the report pages. The overview has no filters, so its link carries none. */
 export function ReportTabs({ active, t, filters }: { active: string; t: T; filters?: ReportFilters }) {
   return (
-    <nav aria-label={t("rep.title")} className="no-scrollbar -mx-1 flex gap-1 overflow-x-auto px-1">
+    <nav aria-label={t("rep.title")} className="flex flex-wrap gap-1">
       {REPORT_TABS.map((tab) => {
         const current = tab.href === active;
         const href = filters && tab.href !== "/reports" ? `${tab.href}?${filterQuery(filters)}` : tab.href;
