@@ -86,7 +86,7 @@ test("admin full journey", async ({ page }) => {
     await expect(page.getByRole("status")).toBeVisible();
   }
 
-  for (const path of ["/", "/animals", "/people", "/calendar", "/calendar?m=2026-07&type=foster_logistics", "/adoptions", "/visibility", "/reports", "/reports/period", "/reports/period?preset=last_year&species=cat&sex=f", "/reports/medical", "/review", "/admin/audit", "/admin/privacy", "/admin/lists"]) {
+  for (const path of ["/", "/animals", "/people", "/calendar", "/calendar?m=2026-07&type=foster_logistics", "/adoptions", "/visibility", "/reports", "/reports/period", "/reports/period?preset=last_year&species=cat&sex=f", "/reports/medical", "/reports/fosters", "/review", "/admin/audit", "/admin/privacy", "/admin/lists"]) {
     await page.goto(path);
     await expect(page.locator("h1").first()).toBeVisible();
   }
@@ -302,7 +302,7 @@ test("admin full journey", async ({ page }) => {
   const catHref = (await page.locator("main li a").first().getAttribute("href"))!;
   const shots: [string, string][] = [
     ["/", "dashboard"], ["/animals", "animals"], ["/calendar?m=2026-07", "calendar"], ["/adoptions", "adoptions"],
-    [catHref, "cat"], [`${catHref}?tab=medical`, "cat-medical"], ["/people", "people"], ["/reports", "reports"], ["/reports/period", "reports-period"], ["/reports/medical", "reports-medical"],
+    [catHref, "cat"], [`${catHref}?tab=medical`, "cat-medical"], ["/people", "people"], ["/reports", "reports"], ["/reports/period", "reports-period"], ["/reports/medical", "reports-medical"], ["/reports/fosters", "reports-fosters"],
     ["/review", "review"], ["/visibility", "visibility"], ["/account", "account"], ["/admin/users", "users"], ["/admin/audit", "audit"], ["/admin/privacy", "privacy"], ["/admin/lists", "lists"],
   ];
   for (const [path, file] of shots) {
@@ -405,6 +405,11 @@ test("a volunteer can't reach contact details or admin pages; a coordinator can 
   await page.goto(href);
   await expect(page.locator("main")).toContainText(phone);
   expect((await page.request.get("/export/adoptions")).status()).toBe(200);
+  const coordCases = await page.request.get("/export/report/fosters?format=csv&table=adoption_cases");
+  expect(coordCases.status()).toBe(200);
+  expect((await coordCases.text()).split("\r\n")[0]).toContain("Adoptator");
+  const coordFosters = await page.request.get("/export/report/fosters?format=csv&table=fosters");
+  expect((await coordFosters.text()).split("\r\n")[0]).toContain("Evaluare foster");
   const personId = href.split("/").pop()!;
   const exported = await page.request.get(`/export/person/${personId}`);
   expect(exported.status()).toBe(200);
@@ -447,6 +452,14 @@ test("a volunteer can't reach contact details or admin pages; a coordinator can 
   expect((await vol.request.get("/export/animals")).status()).toBe(200);
   // The period report holds no personal data, so everyone may download it.
   expect((await vol.request.get("/export/report/period?format=csv&table=animals")).status()).toBe(200);
+  // The fosters report gives a volunteer counts and animal names, but no adopter column and no people's names.
+  const volCases = await vol.request.get("/export/report/fosters?format=csv&table=adoption_cases");
+  expect(volCases.status()).toBe(200);
+  expect((await volCases.text()).split("\r\n")[0]).not.toContain("Adoptator");
+  const volFosters = await vol.request.get("/export/report/fosters?format=csv&table=fosters");
+  expect((await volFosters.text()).split("\r\n")[0]).not.toContain("Evaluare foster");
+  await vol.goto("/reports/fosters");
+  await expect(vol.locator("main")).toContainText("Persoane care fac foster acum");
 
   // The volunteer takes the only place on a shift; the coordinator then can't.
   // The day's panel lists everything, even when the month cell shows only the first few.
