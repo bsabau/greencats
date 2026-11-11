@@ -54,6 +54,7 @@ the admin and import as above, adding the same two `-f` options.
 | | Volunteer | Coordinator | Admin |
 |---|---|---|---|
 | Edit animals, medical records, calendar | yes | yes | yes |
+| See reports and download them as Excel or CSV (counts and animals, no personal data) | yes | yes | yes |
 | See phones, addresses, contact notes | no | yes | yes |
 | Edit contacts, resolve review items | no | yes | yes |
 | Change or delete another person's medical record, export a person's data | no | yes | yes |

@@ -59,6 +59,7 @@ test("anonymous visitors get nothing", async ({ page, request }) => {
   await page.goto("/animals");
   await expect(page).toHaveURL(/\/login/);
   expect((await request.get("/export/animals")).status()).toBe(401);
+  expect((await request.get("/export/report/period?format=csv&table=monthly")).status()).toBe(401);
   expect((await request.get("/photos/00000000-0000-0000-0000-000000000000")).status()).toBe(401);
 });
 
@@ -85,7 +86,7 @@ test("admin full journey", async ({ page }) => {
     await expect(page.getByRole("status")).toBeVisible();
   }
 
-  for (const path of ["/", "/animals", "/people", "/calendar", "/calendar?m=2026-07&type=foster_logistics", "/adoptions", "/visibility", "/reports", "/review", "/admin/audit", "/admin/privacy", "/admin/lists"]) {
+  for (const path of ["/", "/animals", "/people", "/calendar", "/calendar?m=2026-07&type=foster_logistics", "/adoptions", "/visibility", "/reports", "/reports/period", "/reports/period?preset=last_year&species=cat&sex=f", "/review", "/admin/audit", "/admin/privacy", "/admin/lists"]) {
     await page.goto(path);
     await expect(page.locator("h1").first()).toBeVisible();
   }
@@ -301,7 +302,7 @@ test("admin full journey", async ({ page }) => {
   const catHref = (await page.locator("main li a").first().getAttribute("href"))!;
   const shots: [string, string][] = [
     ["/", "dashboard"], ["/animals", "animals"], ["/calendar?m=2026-07", "calendar"], ["/adoptions", "adoptions"],
-    [catHref, "cat"], [`${catHref}?tab=medical`, "cat-medical"], ["/people", "people"], ["/reports", "reports"],
+    [catHref, "cat"], [`${catHref}?tab=medical`, "cat-medical"], ["/people", "people"], ["/reports", "reports"], ["/reports/period", "reports-period"],
     ["/review", "review"], ["/visibility", "visibility"], ["/account", "account"], ["/admin/users", "users"], ["/admin/audit", "audit"], ["/admin/privacy", "privacy"], ["/admin/lists", "lists"],
   ];
   for (const [path, file] of shots) {
@@ -319,6 +320,47 @@ test("admin full journey", async ({ page }) => {
   }
   await page.setViewportSize({ width: 1280, height: 720 });
 
+  expect(failures).toEqual([]);
+});
+
+test("period report: filters live in the link, and downloads match", async ({ page }) => {
+  const failures = watchFailures(page);
+  await signIn(page, adminEmail, adminPassword);
+  await expect(page).toHaveURL(/\/$/);
+  await page.goto("/reports/period");
+  await expect(page.locator('a[aria-current="page"]', { hasText: "Pe perioadă" })).toBeVisible();
+
+  await page.click('a:has-text("Anul trecut")');
+  await expect(page).toHaveURL(/preset=last_year/);
+  await page.fill('input[name="from"]', "2025-01-01");
+  await page.fill('input[name="to"]', "2025-03-31");
+  await page.selectOption('select[name="species"]', "cat");
+  await page.click('button:has-text("Aplică")');
+  await expect(page).toHaveURL(/from=2025-01-01&to=2025-03-31&species=cat/);
+  await expect(page.locator('input[name="from"]')).toHaveValue("2025-01-01");
+  await page.click('summary:has-text("Vezi tabelul")');
+  await expect(page.locator("main tbody tr").filter({ hasText: /2025/ })).toHaveCount(3);
+
+  const query = "from=2025-01-01&to=2025-03-31&species=cat";
+  const xlsx = await page.request.get(`/export/report/period?${query}&format=xlsx`);
+  expect(xlsx.status()).toBe(200);
+  expect(xlsx.headers()["content-type"]).toContain("spreadsheetml");
+  expect(xlsx.headers()["content-disposition"]).toContain("greencats-period-2025-01-01_2025-03-31.xlsx");
+  expect((await xlsx.body()).subarray(0, 2).toString()).toBe("PK");
+
+  const csv = await page.request.get(`/export/report/period?${query}&format=csv&table=monthly`);
+  expect(csv.status()).toBe(200);
+  expect(csv.headers()["content-type"]).toContain("text/csv");
+  const lines = (await csv.text()).trim().split("\r\n");
+  expect(lines[0]).toContain("Luna");
+  expect(lines.slice(1).map((l) => l.split(",")[0])).toEqual(["2025-01", "2025-02", "2025-03"]);
+
+  expect((await page.request.get(`/export/report/period?${query}&format=csv&table=nope`)).status()).toBe(404);
+  expect((await page.request.get("/export/report/nope")).status()).toBe(404);
+  expect((await page.request.get("/export/report/constructor")).status()).toBe(404);
+
+  await page.goto("/admin/audit");
+  await expect(page.locator("main")).toContainText("export.report.period");
   expect(failures).toEqual([]);
 });
 
@@ -378,6 +420,8 @@ test("a volunteer can't reach contact details or admin pages; a coordinator can 
   await expect(vol.locator("form select[name='stage']")).toHaveCount(0);
   expect((await vol.request.get("/export/adoptions")).status()).toBe(403);
   expect((await vol.request.get("/export/animals")).status()).toBe(200);
+  // The period report holds no personal data, so everyone may download it.
+  expect((await vol.request.get("/export/report/period?format=csv&table=animals")).status()).toBe(200);
 
   // The volunteer takes the only place on a shift; the coordinator then can't.
   // The day's panel lists everything, even when the month cell shows only the first few.
