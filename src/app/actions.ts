@@ -291,28 +291,41 @@ export async function completeDue(animalId: string, kind: string, back: string) 
   if (!isUuid(animalId)) fail(target, "invalid");
   if (!(MEDICAL_KINDS as readonly string[]).includes(kind)) fail(target, "invalid");
   const medicalKind = kind as (typeof MEDICAL_KINDS)[number];
-  const [animal] = await db.select().from(s.animals).where(eq(s.animals.id, animalId));
-  if (!animal) fail(target, "invalid");
   const today = todayIso();
-  const birth = animal.birthPrecision === "year" ? null : animal.birthDate;
-  // The same product as last time, if it is still in use. Its interval sets the next date.
-  const [last] = await db
-    .select({ product: s.products })
-    .from(s.medicalRecords)
-    .innerJoin(s.products, eq(s.products.id, s.medicalRecords.productId))
-    .where(and(eq(s.medicalRecords.animalId, animalId), eq(s.medicalRecords.kind, medicalKind)))
-    .orderBy(sql`${s.medicalRecords.date} desc nulls last`, desc(s.medicalRecords.createdAt))
-    .limit(1);
-  const product = last?.product.active ? last.product : null;
-  const [row] = await db
-    .insert(s.medicalRecords)
-    .values({ animalId, kind: medicalKind, date: today, precision: "day", nextDueOn: nextDue(medicalKind, today, birth, product?.intervalDays), productId: product?.id ?? null, createdBy: user.id })
-    .returning({ id: s.medicalRecords.id });
-  if (medicalKind === "sterilization") {
-    await db.update(s.animals).set({ sterilized: "yes", sterilizedText: null, updatedAt: new Date() }).where(eq(s.animals.id, animalId));
-  }
-  await audit(user.id, "medical.complete", "animal", animalId, { record: row.id, kind, on: today });
-  redirect(`${target}${target.includes("?") ? "&" : "?"}done=${row.id}`);
+  const outcome = await db.transaction(async (tx) => {
+    // Locking the cat makes a double tap, or the same tap in two tabs, wait for the first one.
+    const [animal] = await tx.select().from(s.animals).where(eq(s.animals.id, animalId)).for("update");
+    if (!animal) return null;
+    const [already] = await tx
+      .select({ id: s.medicalRecords.id })
+      .from(s.medicalRecords)
+      .where(and(eq(s.medicalRecords.animalId, animalId), eq(s.medicalRecords.kind, medicalKind), eq(s.medicalRecords.date, today)))
+      .limit(1);
+    // Already noted today: a second record would only repeat the first one in the history.
+    if (already) return { id: already.id, added: false };
+    const birth = animal.birthPrecision === "year" ? null : animal.birthDate;
+    // The same product as last time, if it is still in use. Its interval sets the next date.
+    const [last] = await tx
+      .select({ product: s.products })
+      .from(s.medicalRecords)
+      .innerJoin(s.products, eq(s.products.id, s.medicalRecords.productId))
+      .where(and(eq(s.medicalRecords.animalId, animalId), eq(s.medicalRecords.kind, medicalKind)))
+      .orderBy(sql`${s.medicalRecords.date} desc nulls last`, desc(s.medicalRecords.createdAt))
+      .limit(1);
+    const product = last?.product.active ? last.product : null;
+    const [row] = await tx
+      .insert(s.medicalRecords)
+      .values({ animalId, kind: medicalKind, date: today, precision: "day", nextDueOn: nextDue(medicalKind, today, birth, product?.intervalDays), productId: product?.id ?? null, createdBy: user.id })
+      .returning({ id: s.medicalRecords.id });
+    if (medicalKind === "sterilization") {
+      await tx.update(s.animals).set({ sterilized: "yes", sterilizedText: null, updatedAt: new Date() }).where(eq(s.animals.id, animalId));
+    }
+    return { id: row.id, added: true };
+  });
+  if (!outcome) return fail(target, "invalid");
+  if (!outcome.added) redirect(target);
+  await audit(user.id, "medical.complete", "animal", animalId, { record: outcome.id, kind, on: today });
+  redirect(`${target}${target.includes("?") ? "&" : "?"}done=${outcome.id}`);
 }
 
 export async function undoComplete(recordId: string, back: string) {
