@@ -8,6 +8,7 @@ export const REPORT_TABS = [
   { href: "/reports/period", label: "rep.tab.period" },
   { href: "/reports/medical", label: "rep.tab.medical" },
   { href: "/reports/fosters", label: "rep.tab.fosters" },
+  { href: "/reports/shifts", label: "rep.tab.shifts" },
 ] as const;
 
 /** Links between the report pages. The overview has no filters, so its link carries none. */

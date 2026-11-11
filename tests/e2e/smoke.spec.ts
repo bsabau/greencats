@@ -86,7 +86,7 @@ test("admin full journey", async ({ page }) => {
     await expect(page.getByRole("status")).toBeVisible();
   }
 
-  for (const path of ["/", "/animals", "/people", "/calendar", "/calendar?m=2026-07&type=foster_logistics", "/adoptions", "/visibility", "/reports", "/reports/period", "/reports/period?preset=last_year&species=cat&sex=f", "/reports/medical", "/reports/fosters", "/review", "/admin/audit", "/admin/privacy", "/admin/lists"]) {
+  for (const path of ["/", "/animals", "/people", "/calendar", "/calendar?m=2026-07&type=foster_logistics", "/adoptions", "/visibility", "/reports", "/reports/period", "/reports/period?preset=last_year&species=cat&sex=f", "/reports/medical", "/reports/fosters", "/reports/shifts", "/review", "/admin/audit", "/admin/privacy", "/admin/lists"]) {
     await page.goto(path);
     await expect(page.locator("h1").first()).toBeVisible();
   }
@@ -302,7 +302,7 @@ test("admin full journey", async ({ page }) => {
   const catHref = (await page.locator("main li a").first().getAttribute("href"))!;
   const shots: [string, string][] = [
     ["/", "dashboard"], ["/animals", "animals"], ["/calendar?m=2026-07", "calendar"], ["/adoptions", "adoptions"],
-    [catHref, "cat"], [`${catHref}?tab=medical`, "cat-medical"], ["/people", "people"], ["/reports", "reports"], ["/reports/period", "reports-period"], ["/reports/medical", "reports-medical"], ["/reports/fosters", "reports-fosters"],
+    [catHref, "cat"], [`${catHref}?tab=medical`, "cat-medical"], ["/people", "people"], ["/reports", "reports"], ["/reports/period", "reports-period"], ["/reports/medical", "reports-medical"], ["/reports/fosters", "reports-fosters"], ["/reports/shifts", "reports-shifts"],
     ["/review", "review"], ["/visibility", "visibility"], ["/account", "account"], ["/admin/users", "users"], ["/admin/audit", "audit"], ["/admin/privacy", "privacy"], ["/admin/lists", "lists"],
   ];
   for (const [path, file] of shots) {
@@ -470,8 +470,22 @@ test("a volunteer can't reach contact details or admin pages; a coordinator can 
   const shiftUrl = vol.url();
   await page.goto(shiftUrl);
   await expect(page.locator('button:has-text("Mă înscriu")')).toHaveCount(0);
+  // The shifts report counts the place as taken, and gives it back when the volunteer withdraws.
+  const december = async () => {
+    const csv = await page.request.get("/export/report/shifts?from=2026-12-01&to=2026-12-31&format=csv&table=shifts");
+    expect(csv.status()).toBe(200);
+    const row = (await csv.text()).trim().split("\r\n").find((l) => l.startsWith("2026-12,"))!;
+    const [, shifts, places, filled] = row.split(",").map(Number);
+    return { shifts, places, filled };
+  };
+  const taken = await december();
+  expect(taken.shifts).toBeGreaterThanOrEqual(1);
+  expect(taken.filled).toBeGreaterThanOrEqual(1);
   await vol.click('button:has-text("Mă retrag")');
   await expect(vol.locator('button:has-text("Mă înscriu")')).toBeVisible();
+  expect((await december()).filled).toBe(taken.filled - 1);
+  await page.goto("/reports/shifts?from=2026-12-01&to=2026-12-31");
+  await expect(page.locator("main")).toContainText("Animale în grijă de cel mai mult timp");
 
   expect(failures).toEqual([]);
   await context.close();
