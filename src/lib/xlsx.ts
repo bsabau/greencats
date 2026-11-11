@@ -2,6 +2,8 @@ import ExcelJS from "exceljs";
 
 export type Cell = string | number | null | undefined;
 export type Sheet = { name: string; headers: string[]; rows: Cell[][] };
+/** A report table: shown on a page, and downloaded as a CSV file or an Excel sheet. */
+export type ReportTable = { key: string; label: string; headers: string[]; rows: Cell[][] };
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_WIDTH = 50;

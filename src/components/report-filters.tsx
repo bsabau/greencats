@@ -6,6 +6,7 @@ import { PRESETS, filterQuery, type ReportFilters } from "@/lib/report-filters";
 export const REPORT_TABS = [
   { href: "/reports", label: "rep.tab.overview" },
   { href: "/reports/period", label: "rep.tab.period" },
+  { href: "/reports/medical", label: "rep.tab.medical" },
 ] as const;
 
 /** Links between the report pages. The overview has no filters, so its link carries none. */
