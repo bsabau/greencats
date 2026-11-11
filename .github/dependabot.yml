@@ -14,6 +14,11 @@ updates:
       # since those can need code changes.
       npm-minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      # The Node type definitions must match the Node version the app runs on (the image in
+      # the Dockerfile and CI). They move to a new major version together with it, by hand.
+      - dependency-name: "@types/node"
+        update-types: [version-update:semver-major]
 
   # The base images in the Dockerfile.
   - package-ecosystem: docker
