@@ -4,7 +4,7 @@ import type { Key, T } from "@/i18n";
 import type { ReportFilters } from "@/lib/report-filters";
 import type { Precision } from "@/lib/report-math";
 import { summarizePeriod, type PeriodAnimal, type PeriodPlacement, type PeriodRecord, type PeriodSummary } from "@/lib/report-period";
-import type { Cell } from "@/lib/xlsx";
+import type { ReportTable } from "@/lib/xlsx";
 
 /** The period summary for the filters. Holds no personal data: only animals, dates and counts. */
 export async function getPeriodReport(f: ReportFilters): Promise<PeriodSummary> {
@@ -25,8 +25,6 @@ export async function getPeriodReport(f: ReportFilters): Promise<PeriodSummary> 
   ]);
   return summarizePeriod(animals, placements, sterilizations, f.from, f.to);
 }
-
-export type ReportTable = { key: string; label: string; headers: string[]; rows: Cell[][] };
 
 /** A date as precisely as it is known: 2026-03-15, 2026-03 or 2026. */
 const fuzzy = (date: string | null, precision: Precision | null) =>

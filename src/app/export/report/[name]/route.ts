@@ -1,15 +1,17 @@
-import { getPeriodReport, periodTables, type ReportTable } from "@/domain/report-period";
+import { getMedicalReport, medicalTables } from "@/domain/report-medical";
+import { getPeriodReport, periodTables } from "@/domain/report-period";
 import { getI18n, type T } from "@/i18n";
 import { audit, currentUser, type User } from "@/lib/auth";
 import { toCsv } from "@/lib/csv";
 import { parseReportFilters, type ReportFilters } from "@/lib/report-filters";
-import { toXlsx } from "@/lib/xlsx";
+import { toXlsx, type ReportTable } from "@/lib/xlsx";
 
 export const dynamic = "force-dynamic";
 
 /** Each report builds the same tables its page shows, so a download always matches the screen. */
 const REPORTS: Record<string, (user: User, filters: ReportFilters, t: T) => Promise<ReportTable[]>> = {
   period: async (_user, f, t) => periodTables(await getPeriodReport(f), t),
+  medical: async (_user, f, t) => medicalTables(await getMedicalReport(f), t),
 };
 
 const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";

@@ -86,7 +86,7 @@ test("admin full journey", async ({ page }) => {
     await expect(page.getByRole("status")).toBeVisible();
   }
 
-  for (const path of ["/", "/animals", "/people", "/calendar", "/calendar?m=2026-07&type=foster_logistics", "/adoptions", "/visibility", "/reports", "/reports/period", "/reports/period?preset=last_year&species=cat&sex=f", "/review", "/admin/audit", "/admin/privacy", "/admin/lists"]) {
+  for (const path of ["/", "/animals", "/people", "/calendar", "/calendar?m=2026-07&type=foster_logistics", "/adoptions", "/visibility", "/reports", "/reports/period", "/reports/period?preset=last_year&species=cat&sex=f", "/reports/medical", "/review", "/admin/audit", "/admin/privacy", "/admin/lists"]) {
     await page.goto(path);
     await expect(page.locator("h1").first()).toBeVisible();
   }
@@ -302,7 +302,7 @@ test("admin full journey", async ({ page }) => {
   const catHref = (await page.locator("main li a").first().getAttribute("href"))!;
   const shots: [string, string][] = [
     ["/", "dashboard"], ["/animals", "animals"], ["/calendar?m=2026-07", "calendar"], ["/adoptions", "adoptions"],
-    [catHref, "cat"], [`${catHref}?tab=medical`, "cat-medical"], ["/people", "people"], ["/reports", "reports"], ["/reports/period", "reports-period"],
+    [catHref, "cat"], [`${catHref}?tab=medical`, "cat-medical"], ["/people", "people"], ["/reports", "reports"], ["/reports/period", "reports-period"], ["/reports/medical", "reports-medical"],
     ["/review", "review"], ["/visibility", "visibility"], ["/account", "account"], ["/admin/users", "users"], ["/admin/audit", "audit"], ["/admin/privacy", "privacy"], ["/admin/lists", "lists"],
   ];
   for (const [path, file] of shots) {
@@ -361,6 +361,31 @@ test("period report: filters live in the link, and downloads match", async ({ pa
 
   await page.goto("/admin/audit");
   await expect(page.locator("main")).toContainText("export.report.period");
+  expect(failures).toEqual([]);
+});
+
+test("medical report: clinic filter and downloads", async ({ page }) => {
+  const failures = watchFailures(page);
+  await signIn(page, adminEmail, adminPassword);
+  await expect(page).toHaveURL(/\/$/);
+  await page.goto("/reports/medical?preset=last_12_months");
+  await expect(page.locator('a[aria-current="page"]', { hasText: "Medical" })).toBeVisible();
+  // The clinic list is filled by normalize-medical, so there is at least one to choose.
+  const clinic = await page.locator('select[name="clinic"] option').nth(1).getAttribute("value");
+  expect(clinic).toBeTruthy();
+  await page.selectOption('select[name="clinic"]', clinic!);
+  await page.click('button:has-text("Aplică")');
+  await expect(page).toHaveURL(new RegExp(`clinic=${clinic}`));
+  await expect(page.locator("main")).toContainText("Test FIV/FeLV");
+
+  const csv = await page.request.get(`/export/report/medical?preset=last_12_months&clinic=${clinic}&format=csv&table=tests`);
+  expect(csv.status()).toBe(200);
+  const lines = (await csv.text()).trim().split("\r\n");
+  expect(lines).toHaveLength(5);
+  expect(lines[1]).toContain("Test FIV/FeLV");
+  const xlsx = await page.request.get("/export/report/medical?format=xlsx");
+  expect(xlsx.status()).toBe(200);
+  expect(xlsx.headers()["content-type"]).toContain("spreadsheetml");
   expect(failures).toEqual([]);
 });
 
