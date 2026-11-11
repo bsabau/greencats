@@ -1,5 +1,5 @@
-# Type-checks, tests and builds every pull request and every change to main.
-# The end-to-end tests need the Docker stack and an admin account, so they still run locally.
+# Every pull request and every change to main is type-checked, unit-tested and built (check),
+# and the Docker images are built and run with the browser tests against them (e2e).
 name: CI
 
 on:
@@ -34,3 +34,47 @@ jobs:
       - run: npm run build
         env:
           NEXT_TELEMETRY_DISABLED: "1"
+
+  # Builds the production images, starts them on an empty database and runs the browser tests,
+  # so updates to the base images and to runtime behaviour are tested too. Only fictitious data.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      COMPOSE: docker compose -p greencats-ci --env-file ci.env -f docker-compose.yml -f docker-compose.local.yml
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - name: Start the stack
+        run: |
+          # Throwaway values for this run only. The real .env is never in the repository.
+          printf 'POSTGRES_PASSWORD=%s\nDOMAIN=localhost\nBACKUP_DIR=%s\n' "$(openssl rand -hex 24)" "$RUNNER_TEMP/backups" > ci.env
+          $COMPOSE up -d --build --wait app
+      - name: Fill the product and clinic lists, create an admin
+        run: |
+          $COMPOSE run --rm -T tools npm run normalize-medical -- --apply > /dev/null
+          password="Ci-$(openssl rand -hex 16)"
+          echo "::add-mask::$password"
+          echo "E2E_ADMIN_PASSWORD=$password" >> "$GITHUB_ENV"
+          printf '%s\n' "$password" | $COMPOSE run --rm -T tools npm run create-admin -- ci-admin@greencats.local "CI Admin"
+      - name: Browser tests
+        run: npx playwright test --reporter=line
+        env:
+          E2E_ADMIN_EMAIL: ci-admin@greencats.local
+          E2E_BASE_URL: http://localhost:3111
+      - name: App log
+        if: failure()
+        run: $COMPOSE logs --no-color app migrate
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: e2e-results
+          path: test-results/
+          retention-days: 7
