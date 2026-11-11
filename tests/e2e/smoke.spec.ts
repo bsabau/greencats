@@ -205,6 +205,24 @@ test("admin full journey", async ({ page }) => {
   await expect(page.locator("#medical li", { hasText: productName }).first()).toBeVisible();
   const productRow = page.locator("#medical li", { hasText: productName }).filter({ hasText: "Echovet" });
   await expect(productRow).toContainText("16 dec. 2026");
+  // Correcting the date of a record moves its next due date with it, product interval included.
+  await productRow.getByRole("button", { name: /^Modifică Deparazitare internă/ }).click();
+  const editForm = page.locator("dialog[open] form");
+  await expect(editForm.locator('select[name="kind"]')).toHaveValue("deworm_internal");
+  await expect(editForm.locator('select[name="clinicId"] option:checked')).toHaveText("Echovet");
+  await editForm.locator('input[name="date"]').fill("2026-11-10");
+  await editForm.locator('textarea[name="description"]').fill(`QA corectat ${run}`);
+  await editForm.locator('button:has-text("Salvează")').click();
+  await expect(page.getByRole("status")).toBeVisible();
+  const editedRow = page.locator("#medical li", { hasText: `QA corectat ${run}` });
+  await expect(editedRow).toContainText("10 nov. 2026");
+  await expect(editedRow).toContainText("25 dec. 2026");
+  await expect(editedRow).toContainText(productName);
+  // A next date typed by hand is kept.
+  await editedRow.getByRole("button", { name: /^Modifică/ }).click();
+  await page.locator('dialog[open] input[name="nextDueOn"]').fill("2027-02-03");
+  await page.locator('dialog[open] button:has-text("Salvează")').click();
+  await expect(page.locator("#medical li", { hasText: `QA corectat ${run}` })).toContainText("3 feb. 2027");
   // A test type has no product field.
   await page.click('button:has-text("Adaugă înregistrare medicală")');
   await page.locator('dialog[open] select[name="kind"]').selectOption("test_fiv_felv");
@@ -504,9 +522,25 @@ test("data protection: erase a person, delete a cat and an account, and limits o
   await vol.goto(`${cat.href}?tab=medical`);
   await expect(vol.locator("#medical")).toContainText("2027");
   await expect(vol.locator('#medical button[aria-label="Șterge"]')).toHaveCount(0);
+  await expect(vol.locator('#medical button[aria-label^="Modifică"]')).toHaveCount(0);
+  // A volunteer corrects their own record. A phone they wrote in it is hidden from them, so the
+  // description is locked and keeps the number when the date changes.
+  await vol.click('button:has-text("Adaugă înregistrare medicală")');
+  await vol.locator('dialog[open] select[name="kind"]').selectOption("note");
+  await vol.locator('dialog[open] input[name="date"]').fill("2026-11-02");
+  await vol.locator('dialog[open] input[name="description"]').fill(`QA sunat ${run} la 0740000151`);
+  await vol.locator('dialog[open] button:has-text("Salvează")').click();
+  const volRow = vol.locator("#medical li", { hasText: `QA sunat ${run}` });
+  await expect(volRow).not.toContainText("0740000151");
+  await volRow.getByRole("button", { name: /^Modifică/ }).click();
+  await expect(vol.locator("dialog[open] textarea").first()).toBeDisabled();
+  await vol.locator('dialog[open] input[name="date"]').fill("2026-11-03");
+  await vol.locator('dialog[open] button:has-text("Salvează")').click();
+  await expect(vol.locator("#medical li", { hasText: `QA sunat ${run}` })).toContainText("3 nov. 2026");
   await context.close();
   await page.goto(`${cat.href}?tab=medical`);
   await expect(page.locator('#medical button[aria-label="Șterge"]')).not.toHaveCount(0);
+  await expect(page.locator("#medical li", { hasText: `QA sunat ${run}` })).toContainText("0740000151");
 
   // Deleting the cat removes it and its photo.
   const photo = (await page.request.get(`${cat.href}?tab=photos`).then((r) => r.text())).match(/\/photos\/[0-9a-f-]{36}/)![0];

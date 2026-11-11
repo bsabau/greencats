@@ -2,7 +2,7 @@ import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { Check, HeartPulse, Pencil, Repeat2 } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { addMedicalRecord, completeDue, deleteAnimal, deleteMedicalRecord, moveAnimal, undoComplete, updateAnimal, uploadPhoto } from "@/app/actions";
+import { addMedicalRecord, completeDue, deleteAnimal, deleteMedicalRecord, moveAnimal, undoComplete, updateAnimal, updateMedicalRecord, uploadPhoto } from "@/app/actions";
 import { Combobox, ConfirmDelete, DoneButton, MedicalKindFields, ModalButton, MoveFields, SubmitButton } from "@/components/client";
 import { AnimalPhoto, Badge, Card, Definition, Empty, Field, Flash, StatusBadge, btn, btnGhost, inputCls, linkCls } from "@/components/ui";
 import { db, schema as s } from "@/db";
@@ -65,6 +65,8 @@ export default async function AnimalPage({ params, searchParams }: { params: Pro
   // Due dates matter only while the shelter looks after the cat, foster homes included.
   const inCare = (CARE_STATUSES as readonly string[]).includes(animal.status);
   const backToMedical = `/animals/${id}?tab=medical`;
+  const kindOptions = s.medicalKindEnum.enumValues.map((k) => ({ value: k, label: t(`kind.${k}` as Key) }));
+  const medicalLabels = { kind: t("animals.type"), product: t("animals.product"), clinic: t("animals.clinic"), none: none, productHelp: t("animals.productHelp"), result: t("animals.result"), negative: t("result.negative"), positive: t("result.positive") };
   const undo = sp.done ? (
     <form action={undoComplete.bind(null, sp.done, backToMedical)}><button className="cursor-pointer whitespace-nowrap font-semibold underline">{t("common.undo")}</button></form>
   ) : undefined;
@@ -101,13 +103,7 @@ export default async function AnimalPage({ params, searchParams }: { params: Pro
           <div className="mt-3 flex flex-wrap gap-2">
             <ModalButton label={t("animals.addMedical")} title={t("animals.addMedical")} closeLabel={closeLabel} className={btn} icon={<HeartPulse aria-hidden className="h-4 w-4" />}>
               <form action={addMedicalRecord.bind(null, id)} className="grid gap-3 sm:grid-cols-2">
-                <MedicalKindFields
-                  kinds={s.medicalKindEnum.enumValues.map((k) => ({ value: k, label: t(`kind.${k}` as Key) }))}
-                  products={products.filter((p) => p.active)}
-                  clinics={clinics.filter((c) => c.active)}
-                  labels={{ kind: t("animals.type"), product: t("animals.product"), clinic: t("animals.clinic"), none: none, productHelp: t("animals.productHelp"), result: t("animals.result"), negative: t("result.negative"), positive: t("result.positive") }}
-                  select={inputCls}
-                />
+                <MedicalKindFields kinds={kindOptions} products={products.filter((p) => p.active)} clinics={clinics.filter((c) => c.active)} labels={medicalLabels} select={inputCls} />
                 <Field label={t("common.date")}><input className={inputCls} type="date" name="date" defaultValue={today} required /></Field>
                 <Field label={t("animals.description")}><input className={inputCls} name="description" placeholder={t("animals.descriptionHint")} /></Field>
                 <Field label={t("animals.nextDue")} help={t("animals.nextDueHelp")}><input className={inputCls} type="date" name="nextDueOn" /></Field>
@@ -249,7 +245,10 @@ export default async function AnimalPage({ params, searchParams }: { params: Pro
                     <h3 className="text-xs font-semibold uppercase tracking-wide text-stone-500">{year}</h3>
                     <ul className="mt-1 divide-y divide-stone-100">
                       {records.map((m) => {
-                        const detail = redactPhones(user, m.description ?? (m.date ? null : m.rawText));
+                        const shown = m.description ?? (m.date ? null : m.rawText);
+                        const detail = redactPhones(user, shown);
+                        const mine = m.createdBy === user.id || can(user, "medical:delete_any");
+                        const descriptionLocked = hasHidden(user, shown);
                         return (
                           <li key={m.id} className="flex items-start justify-between gap-3 py-2 text-sm">
                             <div className="min-w-0">
@@ -261,8 +260,45 @@ export default async function AnimalPage({ params, searchParams }: { params: Pro
                                 {[fmtDate(m.date, m.precision), m.productId ? productName.get(m.productId) : null, m.clinicId ? clinicName.get(m.clinicId) : null, detail, m.nextDueOn ? `${t("animals.nextDue")}: ${fmtDate(m.nextDueOn)}` : null].filter(Boolean).join(" · ")}
                               </p>
                             </div>
-                            {(m.createdBy === user.id || can(user, "medical:delete_any")) && (
-                              <form action={deleteMedicalRecord.bind(null, id, m.id)}><ConfirmDelete label={t("common.delete")} confirmLabel={t("common.sure")} /></form>
+                            {mine && (
+                              <div className="flex shrink-0 items-center gap-0.5">
+                                <ModalButton
+                                  iconOnly
+                                  label={t("animals.editRecordAria", { kind: t(`kind.${m.kind}` as Key), date: fmtDate(m.date, m.precision) || none })}
+                                  title={t("animals.editMedical")}
+                                  closeLabel={closeLabel}
+                                  className="inline-flex min-h-8 cursor-pointer items-center rounded-lg px-2 py-1 text-stone-400 hover:bg-stone-100 hover:text-stone-700"
+                                  icon={<Pencil aria-hidden className="h-4 w-4" />}
+                                >
+                                  <form action={updateMedicalRecord.bind(null, id, m.id)} className="grid gap-3 sm:grid-cols-2">
+                                    <MedicalKindFields
+                                      kinds={kindOptions}
+                                      // A product or clinic no longer in use still shows on the records that have it.
+                                      products={products.filter((p) => p.active || p.id === m.productId)}
+                                      clinics={clinics.filter((c) => c.active || c.id === m.clinicId)}
+                                      labels={medicalLabels}
+                                      select={inputCls}
+                                      initial={{ kind: m.kind, productId: m.productId, clinicId: m.clinicId, result: m.result }}
+                                    />
+                                    <Field
+                                      label={t("common.date")}
+                                      help={!m.date ? t("animals.dateMissing") : m.precision !== "day" ? t("animals.dateApprox", { date: fmtDate(m.date, m.precision) }) : undefined}
+                                    >
+                                      <input className={inputCls} type="date" name="date" defaultValue={m.date ?? ""} required={!!m.date} />
+                                    </Field>
+                                    <Field label={t("animals.nextDue")} help={t("animals.nextDueEditHelp")}><input className={inputCls} type="date" name="nextDueOn" defaultValue={m.nextDueOn ?? ""} /></Field>
+                                    <div className="sm:col-span-2">
+                                      <Field label={t("animals.description")} help={descriptionLocked ? t("animals.lockedHelp") : undefined}>
+                                        {descriptionLocked
+                                          ? <textarea className={inputCls} rows={3} defaultValue={detail ?? ""} disabled />
+                                          : <textarea className={inputCls} rows={3} name="description" defaultValue={shown ?? ""} />}
+                                      </Field>
+                                    </div>
+                                    <div className="flex items-end sm:col-span-2"><SubmitButton>{t("common.save")}</SubmitButton></div>
+                                  </form>
+                                </ModalButton>
+                                <form action={deleteMedicalRecord.bind(null, id, m.id)}><ConfirmDelete label={t("common.delete")} confirmLabel={t("common.sure")} /></form>
+                              </div>
                             )}
                           </li>
                         );

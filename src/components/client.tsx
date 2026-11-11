@@ -78,11 +78,15 @@ export function Toast({ kind, message, closeLabel, children }: { kind: "ok" | "e
 }
 
 /** Opens its content in a dialog, which appears as a bottom sheet on phones. */
-export function ModalButton({ label, title, closeLabel, className, icon, children }: { label: string; title: string; closeLabel: string; className: string; icon?: ReactNode; children: ReactNode }) {
+export function ModalButton({ label, title, closeLabel, className, icon, iconOnly, children }: {
+  label: string; title: string; closeLabel: string; className: string; icon?: ReactNode;
+  /** Shows only the icon; the label is still read out and shown on hover. */
+  iconOnly?: boolean; children: ReactNode;
+}) {
   const ref = useRef<HTMLDialogElement>(null);
   return (
     <>
-      <button type="button" className={className} onClick={() => ref.current?.showModal()}>{icon}{label}</button>
+      <button type="button" className={className} title={iconOnly ? label : undefined} aria-label={iconOnly ? label : undefined} onClick={() => ref.current?.showModal()}>{icon}{!iconOnly && label}</button>
       <dialog
         ref={ref}
         // Browser validation stops submit from firing, so an invalid form stays open.
@@ -189,15 +193,17 @@ type ProductOption = { id: string; name: string; kinds: string[] };
  * Type, product, clinic and test result of a medical record. The product list follows
  * the chosen type and disappears for types no product belongs to; the result shows for tests only.
  */
-export function MedicalKindFields({ kinds, products, clinics, labels, select }: {
+export function MedicalKindFields({ kinds, products, clinics, labels, select, initial }: {
   kinds: { value: string; label: string }[];
   products: ProductOption[];
   clinics: { id: string; name: string }[];
   labels: { kind: string; product: string; clinic: string; none: string; productHelp: string; result: string; negative: string; positive: string };
   select: string;
+  /** The values of a record being corrected. */
+  initial?: { kind: string; productId: string | null; clinicId: string | null; result: string | null };
 }) {
-  const [kind, setKind] = useState(kinds[0]?.value ?? "");
-  const [productId, setProductId] = useState("");
+  const [kind, setKind] = useState(initial?.kind ?? kinds[0]?.value ?? "");
+  const [productId, setProductId] = useState(initial?.productId ?? "");
   const fitting = products.filter((p) => p.kinds.includes(kind));
   const field = (label: string, control: ReactNode, help?: string) => (
     <label className="block text-sm">
@@ -224,13 +230,13 @@ export function MedicalKindFields({ kinds, products, clinics, labels, select }: 
         </select>
       ), labels.productHelp)}
       {clinics.length > 0 && field(labels.clinic, (
-        <select className={select} name="clinicId" defaultValue="">
+        <select className={select} name="clinicId" defaultValue={initial?.clinicId ?? ""}>
           <option value="">{labels.none}</option>
           {clinics.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
       ))}
       {kind.startsWith("test_") && field(labels.result, (
-        <select className={select} name="result" defaultValue="">
+        <select className={select} name="result" defaultValue={initial?.result ?? ""}>
           <option value="">{labels.none}</option>
           <option value="negative">{labels.negative}</option>
           <option value="positive">{labels.positive}</option>
