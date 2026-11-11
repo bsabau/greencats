@@ -323,13 +323,18 @@ test("admin full journey", async ({ page }) => {
 });
 
 test("a volunteer can't reach contact details or admin pages; a coordinator can see contacts", async ({ page, browser }) => {
-  // Find a person with a phone, as a coordinator.
+  // A coordinator adds a person with a phone, so the test doesn't depend on imported data.
   await firstLogin(page, coordinator.email, coordinator.password, coordinator.next);
-  await page.goto("/people");
-  const row = page.locator("tbody tr").filter({ hasText: "+" }).first();
-  const phone = (await row.locator("td").nth(1).innerText()).split(",")[0].trim();
-  const href = (await row.locator("a").first().getAttribute("href"))!;
-  expect(phone).toMatch(/^\+\d+/);
+  await page.goto("/people/new");
+  const contactName = `QA Persoana Telefon ${run}`;
+  await page.fill('input[name="name"]', contactName);
+  await page.fill('input[name="phones"]', "0740 000 199");
+  await page.click('button:has-text("Salvează")');
+  await expect(page.locator("h1")).toHaveText(contactName);
+  const href = new URL(page.url()).pathname;
+  const phone = "+40740000199";
+  await page.goto(`/people?q=${encodeURIComponent(contactName)}`);
+  await expect(page.locator("tbody tr", { hasText: contactName })).toContainText(phone);
   await page.goto(href);
   await expect(page.locator("main")).toContainText(phone);
   expect((await page.request.get("/export/adoptions")).status()).toBe(200);
